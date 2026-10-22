@@ -1,13 +1,35 @@
 import { execFile } from "node:child_process";
 import type { Exec, ExecResult } from "./types.js";
 
+import { accessSync, constants } from "node:fs";
+import { homedir } from "node:os";
+import { delimiter, join } from "node:path";
+
+/** Common install locations that are often missing from PATH (flyctl's installer, npm global, Homebrew). */
+const EXTRA_BIN = [join(homedir(), ".local", "bin"), join(homedir(), ".fly", "bin"), "/opt/homebrew/bin", "/usr/local/bin"];
+
+export function pathWithFallbacks(env: NodeJS.ProcessEnv = process.env): string {
+  const have = (env.PATH ?? "").split(delimiter);
+  const extra = EXTRA_BIN.filter((d) => !have.includes(d) && isDir(d));
+  return [...have, ...extra].join(delimiter);
+}
+
+function isDir(p: string): boolean {
+  try {
+    accessSync(p, constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Runs a CLI without a shell. Secret values only ever travel via argv/stdin, never through a shell string. */
 export const realExec: Exec = (cmd, args, opts = {}) =>
   new Promise<ExecResult>((resolve) => {
     const child = execFile(
       cmd,
       args,
-      { cwd: opts.cwd, maxBuffer: 16 * 1024 * 1024, env: process.env },
+      { cwd: opts.cwd, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, PATH: pathWithFallbacks() } },
       (error, stdout, stderr) => {
         const code =
           error && typeof (error as NodeJS.ErrnoException).code === "number"

@@ -51,6 +51,8 @@ export interface SinkState {
 }
 
 export interface SecretState {
+  /** Issuer-side handle of the current key (e.g. OpenRouter key hash) so the next rotation can delete it. */
+  issuer_ref?: string;
   last_rotated?: string;
   last_verified?: string;
   sinks: Record<string, SinkState>;

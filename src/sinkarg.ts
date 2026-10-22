@@ -10,6 +10,8 @@ export function parseSinkArg(arg: string): SinkRef {
     case "github": { const [repo, env] = rest.split("/").length > 2 ? [rest.split("/").slice(0, 2).join("/"), rest.split("/")[2]] : [rest, undefined]; return { kind, ...(repo ? { repo } : {}), ...(env ? { env } : {}) }; }
     case "railway": { const [service, environment] = rest.split("/"); return { kind, ...(service ? { service } : {}), ...(environment ? { environment } : {}) }; }
     case "fly": return { kind, ...(rest ? { app: rest } : {}) };
+    case "supabase": return { kind, ...(rest ? { project: rest } : {}) };
+    case "cloudflare": { const [worker, env] = rest.split("/"); return { kind, ...(worker ? { worker } : {}), ...(env ? { env } : {}) }; }
     case "vercel": { const [project, t] = rest.split("/"); return { kind, ...(project ? { project } : {}), ...(t ? { targets: t.split("+") } : {}) }; }
     default: return { kind };
   }
