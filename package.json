@@ -1,6 +1,6 @@
 {
   "name": "keymap-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Values-free map of every secret you run, where it lives, and one command to rotate it everywhere.",
   "license": "MIT",
   "author": "Nekruz Kasimov",
