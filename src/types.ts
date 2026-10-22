@@ -55,8 +55,10 @@ export interface SecretState {
   issuer_ref?: string;
   /** Handle of the key this one replaced; still live until `keymap revoke`. */
   previous_issuer_ref?: string;
-  /** Handles of keys minted by rotations that did not finish; deleted by the next successful --mint. */
+  /** Handles of keys minted by rotations that did not finish. Some hosts may already run them. */
   pending_issuer_refs?: string[];
+  /** Pending keys superseded by a later successful --mint; still live until `keymap revoke`, like previous_issuer_ref. */
+  stale_issuer_refs?: string[];
   last_rotated?: string;
   last_verified?: string;
   sinks: Record<string, SinkState>;

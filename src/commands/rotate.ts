@@ -148,17 +148,13 @@ export async function runRotate(manifest: Manifest, state: State, opts: RotateOp
         // Promote: the minted key is now current; the previous one stays live until `keymap revoke`.
         if (st.issuer_ref && st.issuer_ref !== mintedHash) st.previous_issuer_ref = st.issuer_ref;
         st.issuer_ref = mintedHash;
-        // Every sink now holds the new key, so keys minted by earlier unfinished rotations are safe to delete.
+        // Keys minted by earlier unfinished rotations may already be running on hosts that redeployed in between,
+        // so they are NOT deleted here. They join the revoke-after-redeploy set, exactly like the previous key.
         const stale = (st.pending_issuer_refs ?? []).filter((h) => h !== mintedHash && h !== st.issuer_ref && h !== st.previous_issuer_ref);
         st.pending_issuer_refs = [];
-        for (const h of stale) {
-          try {
-            await deleteKey(mgmt as string, h, opts.fetchFn);
-            issuerNotes.push(`deleted stale key ${h} left by an earlier unfinished rotation`);
-          } catch (e) {
-            st.pending_issuer_refs.push(h);
-            issuerNotes.push(`could not delete stale key ${h} (${(e as Error).message}); will retry on the next successful --mint`);
-          }
+        if (stale.length) {
+          st.stale_issuer_refs = [...new Set([...(st.stale_issuer_refs ?? []), ...stale])];
+          issuerNotes.push(`keys from earlier unfinished rotations (${stale.join(", ")}) stay live until \`keymap revoke ${opts.secret}\``);
         }
         if (st.previous_issuer_ref) {
           issuerNotes.push(`previous key ${st.previous_issuer_ref} is still live on purpose. After every host has redeployed, run: keymap revoke ${opts.secret}`);
@@ -180,8 +176,8 @@ export async function runRotate(manifest: Manifest, state: State, opts: RotateOp
       const pushed = outcomes.filter((o) => o.status === "pushed").map((o) => o.id);
       issuerNotes.push(
         pushed.length
-          ? `minted key ${mintedHash} stays live: ${pushed.join(", ")} already hold it. Re-run with --mint; the next successful rotation deletes it.`
-          : `minted key ${mintedHash} was pushed nowhere; it stays live and is deleted by the next successful --mint (or delete it at https://openrouter.ai/settings/keys).`
+          ? `minted key ${mintedHash} stays live: ${pushed.join(", ")} already hold it. Re-run with --mint; revoke it later with \`keymap revoke ${opts.secret}\`.`
+          : `minted key ${mintedHash} was pushed nowhere; it stays live until \`keymap revoke ${opts.secret}\` (or delete it at https://openrouter.ai/settings/keys).`
       );
       await persist(state);
     }
@@ -238,7 +234,7 @@ export function formatRotate(r: RotateResult): string {
 
 export interface RevokeResult {
   secret: string;
-  deleted?: string;
+  deleted: string[];
   checklist: string[];
 }
 
@@ -246,15 +242,23 @@ export interface RevokeResult {
 export async function runRevoke(manifest: Manifest, state: State, opts: { secret: string; hash?: string; env?: NodeJS.ProcessEnv; fetchFn?: FetchLike; persist?: (s: State) => Promise<void> }): Promise<RevokeResult> {
   const spec = getSecret(manifest, opts.secret);
   if (!spec) throw new Error(`${opts.secret} is not in keymap.yaml`);
-  if (spec.issuer !== "openrouter") return { secret: opts.secret, checklist: manualChecklist(spec.issuer, opts.secret) };
+  if (spec.issuer !== "openrouter") return { secret: opts.secret, deleted: [], checklist: manualChecklist(spec.issuer, opts.secret) };
   const st = (state.secrets[opts.secret] ??= { sinks: {} });
-  const hash = opts.hash ?? st.previous_issuer_ref;
-  if (!hash) throw new Error(`nothing to revoke for ${opts.secret}: no previous key recorded. Pass --hash <hash> (see https://openrouter.ai/settings/keys)`);
-  if (hash === st.issuer_ref) throw new Error(`${hash} is the CURRENT key for ${opts.secret}; refusing to delete it`);
+  const targets = opts.hash ? [opts.hash] : [...(st.previous_issuer_ref ? [st.previous_issuer_ref] : []), ...(st.stale_issuer_refs ?? [])];
+  if (!targets.length) throw new Error(`nothing to revoke for ${opts.secret}: no superseded key recorded. Pass --hash <hash> (see https://openrouter.ai/settings/keys)`);
+  if (targets.includes(st.issuer_ref as string)) throw new Error(`${st.issuer_ref} is the CURRENT key for ${opts.secret}; refusing to delete it`);
+  if (opts.hash && (st.pending_issuer_refs ?? []).includes(opts.hash)) throw new Error(`${opts.hash} belongs to an unfinished rotation; finish it with --mint first`);
   const mgmt = managementKey(opts.env);
   if (!mgmt) throw new Error("revoke needs KEYMAP_OPENROUTER_MGMT_KEY");
-  await deleteKey(mgmt, hash, opts.fetchFn);
-  if (st.previous_issuer_ref === hash) delete st.previous_issuer_ref;
-  await (opts.persist ?? (async () => {}))(state);
-  return { secret: opts.secret, deleted: hash, checklist: [] };
+  const deleted: string[] = [];
+  const persist = opts.persist ?? (async () => {});
+  for (const hash of targets) {
+    await deleteKey(mgmt, hash, opts.fetchFn);
+    deleted.push(hash);
+    if (st.previous_issuer_ref === hash) delete st.previous_issuer_ref;
+    st.stale_issuer_refs = (st.stale_issuer_refs ?? []).filter((h) => h !== hash);
+    await persist(state); // record each deletion as it happens
+  }
+  if (!st.stale_issuer_refs?.length) delete st.stale_issuer_refs;
+  return { secret: opts.secret, deleted, checklist: [] };
 }

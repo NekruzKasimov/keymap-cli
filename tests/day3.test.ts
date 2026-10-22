@@ -198,9 +198,12 @@ describe("openrouter mint", () => {
     const exec2 = fakeExec([{ cmd: "wrangler", result: {} }, { cmd: "gh", result: {} }]);
     const r2 = await runRotate(m2, state, { secret: "OPENROUTER_API_KEY", mint: true, fetchFn, env }, { exec: exec2, cwd: dir });
     expect(r2.ok).toBe(true);
-    expect(state.secrets.OPENROUTER_API_KEY).toMatchObject({ issuer_ref: "h-2", pending_issuer_refs: [] });
-    expect(log.filter((l) => l.method === "DELETE").map((l) => l.url)).toEqual(["https://openrouter.ai/api/v1/keys/h-1"]);
-    expect(r2.issuerNotes.join(" ")).toMatch(/deleted stale key h-1/);
+    expect(state.secrets.OPENROUTER_API_KEY).toMatchObject({ issuer_ref: "h-2", pending_issuer_refs: [], stale_issuer_refs: ["h-1"] });
+    expect(log.filter((l) => l.method === "DELETE")).toEqual([]); // h-1 may be running on a host that redeployed; revoke handles it
+    expect(r2.issuerNotes.join(" ")).toMatch(/h-1\) stay live until `keymap revoke/);
+    const rv = await runRevoke(m2, state, { secret: "OPENROUTER_API_KEY", fetchFn, env });
+    expect(rv.deleted).toEqual(["h-1"]);
+    expect(state.secrets.OPENROUTER_API_KEY.stale_issuer_refs).toBeUndefined();
     expect(await readFile(join(dir, ".env"), "utf8")).toBe("OPENROUTER_API_KEY=sk-or-v1-m2\n");
   });
 
@@ -214,13 +217,13 @@ describe("openrouter mint", () => {
     const fetchFn: FetchLike = async (url, init) => { log.push({ url, method: init.method }); return { ok: true, status: 200, text: async () => "{}" }; };
     const state: State = { version: 1, secrets: { OPENROUTER_API_KEY: { issuer_ref: "h-new", previous_issuer_ref: "h-old", sinks: {} } } };
     const r = await runRevoke(manifest, state, { secret: "OPENROUTER_API_KEY", fetchFn, env: { KEYMAP_OPENROUTER_MGMT_KEY: "mgmt" } });
-    expect(r.deleted).toBe("h-old");
+    expect(r.deleted).toEqual(["h-old"]);
     expect(log).toEqual([{ url: "https://openrouter.ai/api/v1/keys/h-old", method: "DELETE" }]);
     expect(state.secrets.OPENROUTER_API_KEY.previous_issuer_ref).toBeUndefined();
     await expect(runRevoke(manifest, state, { secret: "OPENROUTER_API_KEY", hash: "h-new", fetchFn, env: { KEYMAP_OPENROUTER_MGMT_KEY: "mgmt" } })).rejects.toThrow(/CURRENT key/);
     await expect(runRevoke(manifest, state, { secret: "OPENROUTER_API_KEY", fetchFn, env: { KEYMAP_OPENROUTER_MGMT_KEY: "mgmt" } })).rejects.toThrow(/nothing to revoke/);
     const r2 = await runRevoke(manifest, state, { secret: "OPENAI_API_KEY" });
-    expect(r2.deleted).toBeUndefined();
+    expect(r2.deleted).toEqual([]);
     expect(r2.checklist.join(" ")).toMatch(/platform.openai.com/);
   });
 

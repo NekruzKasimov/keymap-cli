@@ -13,7 +13,7 @@ Day 4. All planned commands exist: `init`, `audit`, `mark`, `rotate`, `incident`
 ## Quick start
 
 ```sh
-npm i -g keymap-cli            # or: npx keymap-cli
+npm i -g keymap-cli            # or: npx keymap-cli   (not published yet; see Status)
 cd your-project
 keymap init -s local:.env github:owner/repo railway:api/production
 # edit keymap.yaml: issuers, rotate_every, ignore list
@@ -104,7 +104,7 @@ Every adapter shells out to the official CLI you are already logged into, with a
 ## Security notes
 
 - Reviewed 2026-10-22 against a written threat model (value leakage, injection, file safety, supply chain, rotation logic). Findings and fixes are in the commit history.
-- `--mint` records the new key's id before pushing and leaves the previous key live until you run `revoke`. If a rotation fails part-way the minted key stays live too (some sinks already hold it) and is deleted by the next successful `--mint`. A second `--mint` is refused until the previous key has been revoked.
+- `--mint` records the new key's id before pushing and leaves the previous key live until you run `revoke`. If a rotation fails part-way the minted key stays live too (some sinks already hold it); a later successful `--mint` moves it to the same revoke-after-redeploy set, and `keymap revoke` deletes all of them. A second `--mint` is refused until the previous key has been revoked.
 - Each host CLI runs with only its own credential variable; every other host token and all `KEYMAP_*` variables are stripped from its environment.
 - Hash prefixes are HMAC-SHA256 with a per-machine salt (`~/.keymap/.salt`), so they cannot be checked offline against a wordlist.
 - Report issues privately to the maintainer before opening a public issue.

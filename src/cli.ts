@@ -23,7 +23,7 @@ const ctx: AdapterContext = { exec: realExec, cwd: process.cwd() };
 const program = new Command()
   .name("keymap")
   .description("Values-free map of every secret you run, where it lives, and one command to rotate it everywhere.")
-  .version("0.0.1");
+  .version("0.1.0");
 
 program
   .command("init")
@@ -87,14 +87,14 @@ program
 
 program
   .command("revoke <secret>")
-  .description("Delete the previous issuer key left live by `rotate --mint`, once every host has redeployed (openrouter)")
+  .description("Delete every superseded issuer key left live by `rotate --mint`, once every host has redeployed (openrouter)")
   .option("--hash <hash>", "delete this key hash instead of the recorded previous one")
   .action(async (secret: string, o: { hash?: string }) => {
     const manifest = await loadManifest();
     const path = statePath(manifest.project);
     const state = await loadState(path);
     const r = await runRevoke(manifest, state, { secret, hash: o.hash, persist: (st) => saveState(path, st) });
-    if (r.deleted) console.log(`${secret}: deleted previous OpenRouter key ${r.deleted}`);
+    if (r.deleted.length) console.log(`${secret}: deleted superseded OpenRouter key${r.deleted.length === 1 ? "" : "s"} ${r.deleted.join(", ")}`);
     else {
       console.log(`${secret}: this issuer has no revoke API. Do it by hand:`);
       r.checklist.forEach((c, i) => console.log(`  ${i + 1}. ${c}`));
