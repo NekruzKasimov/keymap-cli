@@ -31,13 +31,17 @@ export const realExec: Exec = (cmd, args, opts = {}) =>
       args,
       { cwd: opts.cwd, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, PATH: pathWithFallbacks() } },
       (error, stdout, stderr) => {
-        const code =
-          error && typeof (error as NodeJS.ErrnoException).code === "number"
-            ? ((error as NodeJS.ErrnoException).code as unknown as number)
-            : error
-              ? (child.exitCode ?? 1)
-              : 0;
-        resolve({ code, stdout: String(stdout), stderr: String(stderr) });
+        const err = error as (NodeJS.ErrnoException & { code?: number | string }) | null;
+        let code = 0;
+        let errText = String(stderr);
+        if (err) {
+          if (err.code === "ENOENT") {
+            code = 127;
+            errText = errText || `${cmd}: command not found`;
+          } else if (typeof err.code === "number") code = err.code;
+          else code = child.exitCode ?? 1;
+        }
+        resolve({ code, stdout: String(stdout), stderr: errText });
       }
     );
     if (opts.stdin !== undefined) {

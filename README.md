@@ -8,7 +8,7 @@ Built for solo and vibe-coded deployments after the OpenCode (Oct 16, 2026) and 
 
 ## Status
 
-Day 3. `init`, `audit`, `mark`, `rotate` and `incident` work for `local` (.env files), `github` (Actions secrets), `railway`, `vercel`, `fly`, `cloudflare` (Workers) and `supabase` (Edge Function secrets). OpenRouter keys can be minted by API. `remind` is next.
+Day 4. All planned commands exist: `init`, `audit`, `mark`, `rotate`, `incident`, `remind`, `doctor`, for `local` (.env files), `github` (Actions secrets), `railway`, `vercel`, `fly`, `cloudflare` (Workers) and `supabase` (Edge Function secrets). OpenRouter keys can be minted by API. Not yet published to npm.
 
 ## Quick start
 
@@ -24,7 +24,13 @@ keymap rotate SESSION_SECRET --generate  # mint a random value for a secret you 
 keymap rotate OPENROUTER_API_KEY --mint --limit 20 --limit-reset monthly  # create at OpenRouter, push, delete old
 keymap incident railway         # a host was breached: what lives there, most dangerous first
 keymap incident railway --walk  # ...and rotate each one in turn
+keymap doctor                   # which host CLIs are installed and logged in
+keymap remind --webhook $SLACK  # post the audit summary to Slack or Discord (names only)
 ```
+
+## Run it every day
+
+Copy `templates/keymap-audit.yml` to `.github/workflows/` and add the host tokens it lists as repository secrets. It runs `keymap audit` each morning and, if `KEYMAP_WEBHOOK` is set, posts a one-message summary. Findings never contain values, so the summary is safe for a shared channel.
 
 `rotate` stops at the first failing sink, tells you which sinks still hold the old value, and never records a rotation it did not finish. The value is read from stdin so it stays out of shell history.
 

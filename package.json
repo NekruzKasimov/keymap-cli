@@ -5,7 +5,7 @@
   "license": "MIT",
   "type": "module",
   "bin": { "keymap": "./dist/cli.js" },
-  "files": ["dist", "README.md"],
+  "files": ["dist", "templates", "README.md"],
   "scripts": {
     "build": "tsup src/cli.ts --format esm --target node20 --clean",
     "dev": "tsx src/cli.ts",

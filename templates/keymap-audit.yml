@@ -1,0 +1,54 @@
+# Daily secret audit with keymap. Copy to .github/workflows/keymap-audit.yml
+#
+# Needs, as repository secrets, the tokens for the hosts your keymap.yaml references:
+#   RAILWAY_TOKEN   (Railway -> Account -> Tokens)   used by `railway` automatically
+#   VERCEL_TOKEN    (Vercel  -> Account -> Tokens)   passed as --token via VERCEL_TOKEN env
+#   FLY_API_TOKEN   (flyctl tokens create readonly)  used by `flyctl` automatically
+#   CLOUDFLARE_API_TOKEN                               used by `wrangler` automatically
+#   SUPABASE_ACCESS_TOKEN                              used by `supabase` automatically
+# GITHUB_TOKEN is provided by Actions and lets `gh secret list` read this repo's secret names.
+# Optional: KEYMAP_WEBHOOK (Slack or Discord incoming webhook) to receive the daily summary.
+name: keymap audit
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install host CLIs referenced by keymap.yaml
+        run: |
+          npm i -g keymap-cli
+          grep -q "railway" keymap.yaml && npm i -g @railway/cli || true
+          grep -q "vercel" keymap.yaml && npm i -g vercel || true
+          grep -q "cloudflare" keymap.yaml && npm i -g wrangler || true
+          grep -q "supabase" keymap.yaml && npm i -g supabase || true
+          grep -q "fly" keymap.yaml && curl -L https://fly.io/install.sh | sh && echo "$HOME/.fly/bin" >> $GITHUB_PATH || true
+      - name: Audit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: keymap audit
+      - name: Remind
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          KEYMAP_WEBHOOK: ${{ secrets.KEYMAP_WEBHOOK }}
+        run: if [ -n "$KEYMAP_WEBHOOK" ]; then keymap remind --webhook "$KEYMAP_WEBHOOK"; fi

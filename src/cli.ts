@@ -6,6 +6,8 @@ import { formatAudit, runAudit } from "./commands/audit.js";
 import { runInit } from "./commands/init.js";
 import { formatPlan, formatWalk, planIncident, walkIncident, type IncidentItem } from "./commands/incident.js";
 import { formatRotate, runRotate } from "./commands/rotate.js";
+import { buildReminder, postReminder } from "./commands/remind.js";
+import { formatDoctor, runDoctor } from "./commands/doctor.js";
 import { createInterface } from "node:readline/promises";
 import type { SinkKind } from "./types.js";
 import { realExec } from "./exec.js";
@@ -106,6 +108,33 @@ program
     } finally {
       rl.close();
     }
+  });
+
+program
+  .command("remind")
+  .description("Run the audit and post a one-message summary to a Slack or Discord webhook (names only, never values)")
+  .option("--webhook <url>", "incoming webhook URL (or KEYMAP_WEBHOOK env)")
+  .option("--always", "post even when there is nothing to report")
+  .action(async (o: { webhook?: string; always?: boolean }) => {
+    const webhook = o.webhook ?? process.env.KEYMAP_WEBHOOK;
+    const manifest = await loadManifest();
+    const state = await loadState(statePath(manifest.project));
+    const r = await runAudit(manifest, state, ctx);
+    const { text, count } = buildReminder(manifest.project, r);
+    if (!count && !o.always) { console.log(text, "(nothing posted)"); return; }
+    if (!webhook) { console.log(text); console.log("\n(no --webhook / KEYMAP_WEBHOOK given, printed instead)"); process.exitCode = r.failed ? 1 : 0; return; }
+    await postReminder(webhook, text);
+    console.log(`posted ${count} line${count === 1 ? "" : "s"} to webhook`);
+    process.exitCode = r.failed ? 1 : 0;
+  });
+
+program
+  .command("doctor")
+  .description("Check which host CLIs are installed and logged in")
+  .action(async () => {
+    const rows = await runDoctor(ctx);
+    console.log(formatDoctor(rows));
+    process.exitCode = rows.some((r) => r.installed && r.loggedIn === false) ? 1 : 0;
   });
 
 program
