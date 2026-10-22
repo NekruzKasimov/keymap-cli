@@ -29,7 +29,7 @@
   ],
   "type": "module",
   "bin": {
-    "keymap": "./dist/cli.js"
+    "keymap": "dist/cli.js"
   },
   "files": [
     "dist",
