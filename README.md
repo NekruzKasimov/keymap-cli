@@ -15,6 +15,7 @@ npm i -g keymap-cli            # or: npx keymap-cli
 cd your-project
 keymap init -s local:.env github:owner/repo railway:api/production
 # edit keymap.yaml: issuers, rotate_every, ignore list
+# (init skips config-looking names such as APP_URL, UPLOAD_DIR, MERCHANT_ID; pass --all to include them)
 keymap audit                   # exit 1 on missing / drift / overdue / unmapped
 keymap mark OPENAI_API_KEY     # you rotated it by hand today
 pbpaste | keymap rotate OPENAI_API_KEY   # push a new key everywhere, hosts first, laptop last

@@ -48,6 +48,19 @@ export function manualChecklist(issuer: Issuer, name: string): string[] {
       return [
         "Delete the old key at https://openrouter.ai/settings/keys once traffic has moved (or set KEYMAP_OPENROUTER_MGMT_KEY to let keymap do this).",
       ];
+    case "resend":
+      return [
+        `Open https://resend.com/api-keys and confirm the new ${name} is listed.`,
+        "Delete the old key once every sink has the new one.",
+      ];
+    case "telegram":
+      return [
+        `In Telegram, open @BotFather -> /revoke and pick the bot behind ${name}; the old token stops working at once, so push the new one everywhere first.`,
+      ];
+    case "github":
+      return [
+        "GitHub -> Settings -> Developer settings -> tokens: delete the old token after every sink has the new one.",
+      ];
     case "custom":
       return [`Tell the service that consumes ${name} about the new value (its own config, or a peer app) and retire the old one.`];
   }

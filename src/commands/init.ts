@@ -13,6 +13,9 @@ export function guessIssuer(name: string): Issuer {
   if (n.includes("STRIPE")) return "stripe";
   if (n.includes("SUPABASE")) return "supabase";
   if (n.includes("CLOUDFLARE") || n.startsWith("CF_")) return "cloudflare";
+  if (n.includes("RESEND")) return "resend";
+  if (n.includes("TELEGRAM")) return "telegram";
+  if (n.includes("GITHUB") || n.startsWith("GH_")) return "github";
   return "custom";
 }
 

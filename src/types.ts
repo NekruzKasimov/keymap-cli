@@ -5,6 +5,9 @@ export type Issuer =
   | "google"
   | "stripe"
   | "supabase"
+  | "resend"
+  | "telegram"
+  | "github"
   | "cloudflare"
   | "custom";
 

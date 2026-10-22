@@ -40,9 +40,21 @@ function checkFields(kind: string, fields: Record<string, unknown>, path: string
 /** Names that are config, not secrets. `init` skips them and `audit` does not report them as unmapped. */
 export const NOISE = /^(NODE_ENV|PORT|HOST|HOSTNAME|PATH|HOME|TZ|LANG|LC_|CI|DEBUG|LOG_LEVEL|NEXT_PUBLIC_|VITE_|PUBLIC_|RAILWAY_|VERCEL_)/;
 
+/** Names that always denote a credential, whatever their suffix. */
+const CREDENTIAL = /(SECRET|KEY|TOKEN|PASSWORD|PASSWD|PRIVATE|CREDENTIAL|SIGNING|WEBHOOK|DATABASE|DIRECT_URL|SHADOW_URL|DSN|CONNECTION|REDIS|MONGO|POSTGRES|MYSQL)/;
+
+/** Suffixes that denote plain configuration (an address, an id, a path, an amount), unless the name is clearly a credential. */
+const CONFIG_SUFFIX = /(_URL|_URI|_HOST|_PORT|_DIR|_PATH|_FILE|_ID|_NAME|_FROM|_TO|_EMAIL|_PRICE|_AMOUNT|_LIMIT|_COUNT|_SIZE|_TIMEOUT|_INTERVAL|_REGION|_ZONE|_BUCKET|_VERSION|_MODE|_ENV|_FLAG|_ENABLED|_URL_PROD)$/;
+
+/** True for names that look like configuration rather than a secret (e.g. APP_URL, UPLOAD_DIR, MERCHANT_ID). */
+export function looksLikeConfig(name: string): boolean {
+  if (CREDENTIAL.test(name)) return false;
+  return CONFIG_SUFFIX.test(name);
+}
+
 /** True when a name should be ignored: built-in noise, or matched by a manifest `ignore` glob (prefix* or exact). */
 export function isIgnored(name: string, ignore: string[] = []): boolean {
-  if (NOISE.test(name)) return true;
+  if (NOISE.test(name) || looksLikeConfig(name)) return true;
   return ignore.some((g) => (g.endsWith("*") ? name.startsWith(g.slice(0, -1)) : name === g));
 }
 
