@@ -2,6 +2,8 @@
 
 A values-free map of every secret you run, where it lives, and one command to rotate it everywhere.
 
+![keymap incident railway, then a dry-run rotate](docs/keymap-demo.svg)
+
 **It is a map, not a vault.** keymap never stores a secret value. The manifest and its state hold names, locations, timestamps and short salted hashes. Values move only between your existing CLIs (`gh`, `railway`, …) and the host, over stdin or a mode-600 temp file, never through a shell string or on a command line.
 
 Built after the OpenCode (Oct 16, 2026) and Railway (Oct 21, 2026) key thefts, when "rotate every variable" met "I don't remember where half of these are used".
