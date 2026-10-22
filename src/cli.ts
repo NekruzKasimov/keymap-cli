@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command, Option } from "commander";
-import { basename } from "node:path";
+
 import { supportedSinks } from "./adapters/index.js";
 import { formatAudit, runAudit } from "./commands/audit.js";
 import { runInit } from "./commands/init.js";
@@ -9,7 +9,20 @@ import { formatRotate, runRevoke, runRotate } from "./commands/rotate.js";
 import { buildReminder, postReminder } from "./commands/remind.js";
 import { formatDoctor, runDoctor } from "./commands/doctor.js";
 import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { basename, dirname, join } from "node:path";
 import { Prompter, readStdin } from "./prompt.js";
+
+function pkgVersion(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  for (const rel of ["../package.json", "./package.json"]) {
+    try {
+      return (JSON.parse(readFileSync(join(here, rel), "utf8")) as { version: string }).version;
+    } catch {}
+  }
+  return "0.0.0";
+}
 import { getSecret } from "./manifest.js";
 import type { SinkKind, State } from "./types.js";
 import { realExec } from "./exec.js";
@@ -23,7 +36,7 @@ const ctx: AdapterContext = { exec: realExec, cwd: process.cwd() };
 const program = new Command()
   .name("keymap")
   .description("Values-free map of every secret you run, where it lives, and one command to rotate it everywhere.")
-  .version("0.1.0");
+  .version(pkgVersion());
 
 program
   .command("init")

@@ -1,6 +1,6 @@
 {
   "name": "keymap-cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Values-free map of every secret you run, where it lives, and one command to rotate it everywhere.",
   "license": "MIT",
   "author": "Nekruz Kasimov",
@@ -40,7 +40,8 @@
     "build": "tsup",
     "dev": "tsx src/cli.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build && npm test"
   },
   "engines": {
     "node": ">=20"
