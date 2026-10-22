@@ -84,6 +84,7 @@ export async function walkIncident(
   items: IncidentItem[],
   prompt: Prompt,
   ctx: AdapterContext,
+  persist: (s: State) => Promise<void> = async () => {},
   onResult: (r: RotateResult) => void | Promise<void> = (r) => console.log(formatRotate(r))
 ): Promise<WalkResult> {
   const out: WalkResult = { rotated: [], skipped: [], failed: [], stoppedEarly: false };
@@ -97,7 +98,7 @@ export async function walkIncident(
       out.skipped.push(item.secret);
       continue;
     }
-    const r = await runRotate(manifest, state, { secret: item.secret, value }, ctx);
+    const r = await runRotate(manifest, state, { secret: item.secret, value, persist }, ctx);
     await onResult(r);
     (r.ok ? out.rotated : out.failed).push(item.secret);
   }

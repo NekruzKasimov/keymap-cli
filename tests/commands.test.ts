@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { formatAudit, runAudit } from "../src/commands/audit.js";
 import { buildManifest, guessIssuer } from "../src/commands/init.js";
-import { fakeExec } from "../src/exec.js";
+import { fakeExec } from "./helpers.js";
 import { digestOf } from "../src/state.js";
 import type { Manifest, State } from "../src/types.js";
 
@@ -79,7 +79,9 @@ describe("audit", () => {
     expect(r.findings).toContainEqual({ kind: "unknown", sink: "railway:api", names: ["EXTRA"] });
     expect(r.failed).toBe(true);
     const row = r.rows.find((x) => x.secret === "OPENAI_API_KEY")!;
-    expect(row.sinks.find((s) => s.id === "local:.env")!.digest).toBe(digestOf("local-value"));
+    expect(row.sinks.find((s) => s.id === "local:.env")!.comparable).toBe(true);
+    expect(row.sinks.find((s) => s.id === "local:.env")!.drift).toBe(true);
+    expect(JSON.stringify(r)).not.toContain(digestOf("local-value"));
     expect(row.sinks.find((s) => s.id === "github:.")!.verifiable).toBe(false);
   });
 

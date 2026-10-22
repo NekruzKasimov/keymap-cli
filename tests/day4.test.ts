@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AuditResult } from "../src/commands/audit.js";
 import { formatDoctor, runDoctor } from "../src/commands/doctor.js";
 import { buildReminder, postReminder } from "../src/commands/remind.js";
-import { fakeExec } from "../src/exec.js";
+import { fakeExec } from "./helpers.js";
 
 describe("remind", () => {
   const base: AuditResult = { rows: [], findings: [], failed: false };

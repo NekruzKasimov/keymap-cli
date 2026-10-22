@@ -5,12 +5,14 @@ import { describe, expect, it } from "vitest";
 import { githubAdapter } from "../src/adapters/github.js";
 import { localAdapter, parseDotenv, upsertDotenv } from "../src/adapters/local.js";
 import { railwayAdapter } from "../src/adapters/railway.js";
-import { fakeExec } from "../src/exec.js";
+import { fakeExec } from "./helpers.js";
 import { digestOf } from "../src/state.js";
 
 describe("local adapter", () => {
   it("parses dotenv forms", () => {
     const t = `# c\nA=1\nexport B="two words"\nC='x#y'\nD=val # trailing\n\nbad line\n`;
+    expect(parseDotenv("A=1\nA=2\n")).toEqual([{ name: "A", value: "2" }]);
+    expect(parseDotenv(`A='x y'\nB="q\\"z"\n`)).toEqual([{ name: "A", value: "x y" }, { name: "B", value: 'q"z' }]);
     expect(parseDotenv(t)).toEqual([
       { name: "A", value: "1" },
       { name: "B", value: "two words" },
@@ -22,7 +24,9 @@ describe("local adapter", () => {
   it("upserts without touching other lines", () => {
     const t = `# header\nA=1\nexport B=old\n`;
     expect(upsertDotenv(t, "B", "new")).toBe(`# header\nA=1\nexport B=new\n`);
-    expect(upsertDotenv(t, "Z", "has space")).toBe(`# header\nA=1\nexport B=old\nZ="has space"\n`);
+    expect(upsertDotenv(t, "Z", "has space")).toBe(`# header\nA=1\nexport B=old\nZ='has space'\n`);
+    expect(upsertDotenv("A=1\nA=2\n", "A", "3")).toBe("A=3\nA=3\n");
+    expect(upsertDotenv("", "Q", `it's $x`)).toBe(`Q="it's $x"\n`);
     expect(upsertDotenv("", "A", "x")).toBe(`A=x\n`);
   });
 

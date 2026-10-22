@@ -1,3 +1,4 @@
+import { cliError, parseJsonSafe } from "../exec.js";
 import type { AdapterContext, SinkAdapter, SinkEntry, SinkRef } from "../types.js";
 
 /**
@@ -19,15 +20,15 @@ export const cloudflareAdapter: SinkAdapter = {
   id: (ref) => `cloudflare:${(ref.worker as string) ?? "linked"}${ref.env ? `/${ref.env}` : ""}`,
   async list(ref: SinkRef, ctx: AdapterContext): Promise<SinkEntry[]> {
     const r = await ctx.exec("wrangler", ["secret", "list", "--format", "json", ...scope(ref)], { cwd: ctx.cwd });
-    if (r.code !== 0) throw new Error(`wrangler secret list failed: ${r.stderr.trim() || r.stdout.trim()}`);
+    if (r.code !== 0) throw cliError("wrangler secret list", r, { stdoutSafe: true });
     // wrangler may print banner lines before the JSON; take from the first '['.
     const text = r.stdout.slice(r.stdout.indexOf("["));
-    const rows = JSON.parse(text || "[]") as Array<{ name: string }>;
+    const rows = parseJsonSafe<Array<{ name: string }>>(text || "[]", "wrangler secret list");
     return rows.map((x) => ({ name: x.name }));
   },
   async set(ref, name, value, ctx) {
     const r = await ctx.exec("wrangler", ["secret", "put", name, ...scope(ref)], { stdin: value, cwd: ctx.cwd });
-    if (r.code !== 0) throw new Error(`wrangler secret put ${name} failed: ${r.stderr.trim() || r.stdout.trim()}`);
+    if (r.code !== 0) throw cliError(`wrangler secret put ${name}`, r, { stdoutSafe: true, redact: [value] });
     return { name };
   },
 };

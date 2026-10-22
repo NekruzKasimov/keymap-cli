@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { formatRotate, orderSinks, runRotate } from "../src/commands/rotate.js";
-import { fakeExec } from "../src/exec.js";
+import { fakeExec } from "./helpers.js";
 import { generateSecret } from "../src/issuers.js";
 import { digestOf } from "../src/state.js";
 import type { Manifest, State } from "../src/types.js";
@@ -51,6 +51,7 @@ describe("rotate", () => {
     expect(r.ok).toBe(true);
     expect(r.outcomes.map((o) => o.id)).toEqual(["railway:api", "github:o/r", "local:.env"]);
     expect(r.outcomes.every((o) => o.status === "pushed")).toBe(true);
+    expect(JSON.stringify(r)).not.toContain("sk-new");
     expect(r.redeploy).toEqual(["railway:api"]);
     expect(r.checklist.join(" ")).toMatch(/platform.openai.com/);
     expect(state.secrets.OPENAI_API_KEY.last_rotated).toBeDefined();
@@ -94,6 +95,7 @@ describe("rotate", () => {
   it("rejects missing or empty values", async () => {
     const ctx = { exec: fakeExec([]), cwd: "/x" };
     await expect(runRotate(manifest, { version: 1, secrets: {} }, { secret: "OPENAI_API_KEY" }, ctx)).rejects.toThrow(/no new value/);
+    await expect(runRotate(manifest, { version: 1, secrets: {} }, { secret: "constructor", value: "x" }, ctx)).rejects.toThrow(/not in keymap/);
     await expect(runRotate(manifest, { version: 1, secrets: {} }, { secret: "OPENAI_API_KEY", value: " " }, ctx)).rejects.toThrow(/empty/);
     await expect(runRotate(manifest, { version: 1, secrets: {} }, { secret: "NOPE", value: "x" }, ctx)).rejects.toThrow(/not in keymap/);
   });

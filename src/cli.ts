@@ -1,15 +1,17 @@
 #!/usr/bin/env node
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import { basename } from "node:path";
 import { supportedSinks } from "./adapters/index.js";
 import { formatAudit, runAudit } from "./commands/audit.js";
 import { runInit } from "./commands/init.js";
 import { formatPlan, formatWalk, planIncident, walkIncident, type IncidentItem } from "./commands/incident.js";
-import { formatRotate, runRotate } from "./commands/rotate.js";
+import { formatRotate, runRevoke, runRotate } from "./commands/rotate.js";
 import { buildReminder, postReminder } from "./commands/remind.js";
 import { formatDoctor, runDoctor } from "./commands/doctor.js";
-import { createInterface } from "node:readline/promises";
-import type { SinkKind } from "./types.js";
+import { readFile } from "node:fs/promises";
+import { askHidden, readStdin } from "./prompt.js";
+import { getSecret } from "./manifest.js";
+import type { SinkKind, State } from "./types.js";
 import { realExec } from "./exec.js";
 import { loadManifest } from "./manifest.js";
 import { loadState, saveState, statePath } from "./state.js";
@@ -34,6 +36,7 @@ program
     const sinks = o.sink.map(parseSinkArg);
     const r = await runInit({ project: o.project, sinks, all: o.all, force: o.force }, ctx);
     for (const s of r.perSink) console.log(s.error ? `  ${s.id}: ERROR ${s.error}` : `  ${s.id}: ${s.count} secrets`);
+    if (r.skipped.length) console.log(`  skipped (not UPPER_SNAKE_CASE): ${r.skipped.join(", ")}`);
     console.log(`wrote keymap.yaml with ${Object.keys(r.manifest.secrets).length} secrets. Edit issuers and rotate_every, then run \`keymap audit\`.`);
   });
 
@@ -49,33 +52,45 @@ program
     process.exitCode = r.failed ? 1 : 0;
   });
 
-async function readStdin(): Promise<string | undefined> {
-  if (process.stdin.isTTY) return undefined;
-  const chunks: Buffer[] = [];
-  for await (const c of process.stdin) chunks.push(c as Buffer);
-  const s = Buffer.concat(chunks).toString("utf8");
-  return s.length ? s.replace(/\r?\n$/, "") : undefined;
-}
-
 program
   .command("rotate <secret>")
   .description("Push a new value to every sink in order; stops on the first failure and tells you which sinks still hold the old value")
-  .option("--value <value>", "new value (prefer stdin: `pbpaste | keymap rotate KEY`, so it stays out of shell history)")
+  .option("--value-file <path>", "read the new value from a file (or pipe it: `pbpaste | keymap rotate KEY`; on a TTY you are prompted without echo)")
   .option("--generate", "mint a random 32-byte value (custom secrets only)")
-  .option("--mint", "create the key at the issuer by API, push it, delete the old one (openrouter; needs KEYMAP_OPENROUTER_MGMT_KEY)")
-  .option("--limit <usd>", "credit limit for a minted key, in USD", parseFloat)
-  .option("--limit-reset <period>", "daily | weekly | monthly reset for the minted key's limit")
+  .option("--mint", "create the key at the issuer by API and push it; the old key stays live until `keymap revoke` (openrouter; needs KEYMAP_OPENROUTER_MGMT_KEY)")
+  .option("--limit <usd>", "credit limit for a minted key, in USD", (v: string) => { const n = Number(v); if (!Number.isFinite(n) || n <= 0) throw new Error(`--limit must be a positive number, got "${v}"`); return n; })
+  .addOption(new Option("--limit-reset <period>", "reset period for the minted key's limit").choices(["daily", "weekly", "monthly"]))
   .option("--dry-run", "show the push order and do nothing")
   .option("--json", "machine-readable output")
-  .action(async (secret: string, o: { value?: string; generate?: boolean; mint?: boolean; limit?: number; limitReset?: "daily" | "weekly" | "monthly"; dryRun?: boolean; json?: boolean }) => {
+  .action(async (secret: string, o: { valueFile?: string; generate?: boolean; mint?: boolean; limit?: number; limitReset?: "daily" | "weekly" | "monthly"; dryRun?: boolean; json?: boolean }) => {
     const manifest = await loadManifest();
     const path = statePath(manifest.project);
     const state = await loadState(path);
-    const value = o.value ?? (o.generate || o.mint || o.dryRun ? undefined : await readStdin());
-    const r = await runRotate(manifest, state, { secret, value, generate: o.generate, mint: o.mint, limit: o.limit, limitReset: o.limitReset, dryRun: o.dryRun }, ctx);
-    if (!r.dryRun && r.ok) await saveState(path, state);
+    let value: string | undefined;
+    if (!o.generate && !o.mint && !o.dryRun) {
+      if (o.valueFile) value = (await readFile(o.valueFile, "utf8")).replace(/\r?\n$/, "");
+      else value = (await readStdin()) ?? (await askHidden(`New value for ${secret} (not echoed): `));
+    }
+    const persist = (st: State) => saveState(path, st);
+    const r = await runRotate(manifest, state, { secret, value, generate: o.generate, mint: o.mint, limit: o.limit, limitReset: o.limitReset, dryRun: o.dryRun, persist }, ctx);
     console.log(o.json ? JSON.stringify(r, null, 2) : formatRotate(r));
     process.exitCode = r.ok ? 0 : 1;
+  });
+
+program
+  .command("revoke <secret>")
+  .description("Delete the previous issuer key left live by `rotate --mint`, once every host has redeployed (openrouter)")
+  .option("--hash <hash>", "delete this key hash instead of the recorded previous one")
+  .action(async (secret: string, o: { hash?: string }) => {
+    const manifest = await loadManifest();
+    const path = statePath(manifest.project);
+    const state = await loadState(path);
+    const r = await runRevoke(manifest, state, { secret, hash: o.hash, persist: (st) => saveState(path, st) });
+    if (r.deleted) console.log(`${secret}: deleted previous OpenRouter key ${r.deleted}`);
+    else {
+      console.log(`${secret}: this issuer has no revoke API. Do it by hand:`);
+      r.checklist.forEach((c, i) => console.log(`  ${i + 1}. ${c}`));
+    }
   });
 
 program
@@ -94,20 +109,15 @@ program
     if (!o.walk || !items.length) return;
     const path = statePath(manifest.project);
     const state = await loadState(path);
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
     const prompt = async (item: IncidentItem) => {
       console.log("");
-      const a = await rl.question(`New value for ${item.secret} (${item.issuer}; create it at the issuer first). Enter = skip, q = stop: `);
+      const a = await askHidden(`New value for ${item.secret} (${item.issuer}; create it at the issuer first; not echoed). Enter = skip, q = stop: `);
       if (a.trim().toLowerCase() === "q") return null;
       return a.trim() || undefined;
     };
-    try {
-      const w = await walkIncident(manifest, state, items, prompt, ctx, async (r) => { console.log(formatRotate(r)); if (r.ok) await saveState(path, state); });
-      console.log(formatWalk(w, items));
-      process.exitCode = w.failed.length || w.stoppedEarly ? 1 : 0;
-    } finally {
-      rl.close();
-    }
+    const w = await walkIncident(manifest, state, items, prompt, ctx, (st) => saveState(path, st), async (r) => { console.log(formatRotate(r)); });
+    console.log(formatWalk(w, items));
+    process.exitCode = w.failed.length || w.stoppedEarly ? 1 : 0;
   });
 
 program
@@ -143,7 +153,7 @@ program
   .option("--at <iso>", "timestamp instead of now")
   .action(async (secret: string, o: { at?: string }) => {
     const manifest = await loadManifest();
-    if (!manifest.secrets[secret]) throw new Error(`${secret} is not in keymap.yaml`);
+    if (!getSecret(manifest, secret)) throw new Error(`${secret} is not in keymap.yaml`);
     const path = statePath(manifest.project);
     const state = await loadState(path);
     const when = o.at ? new Date(o.at).toISOString() : new Date().toISOString();

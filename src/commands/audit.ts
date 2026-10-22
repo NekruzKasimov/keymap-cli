@@ -15,7 +15,7 @@ export interface AuditRow {
   issuer: string;
   ageDays?: number;
   rotateEvery?: string;
-  sinks: Array<{ id: string; present: boolean; digest?: string; verifiable: boolean }>;
+  sinks: Array<{ id: string; present: boolean; comparable: boolean; verifiable: boolean; drift?: boolean }>;
 }
 
 export interface AuditResult {
@@ -59,16 +59,20 @@ export async function runAudit(manifest: Manifest, state: State, ctx: AdapterCon
       (claimed.get(id) ?? claimed.set(id, new Set()).get(id)!).add(name);
       const listing = listings.get(id);
       if (!listing) {
-        row.sinks.push({ id, present: false, verifiable: adapter.verifiable });
+        row.sinks.push({ id, present: false, comparable: false, verifiable: adapter.verifiable });
         continue;
       }
       const entry = listing.get(name);
-      row.sinks.push({ id, present: !!entry, digest: entry?.digest, verifiable: adapter.verifiable });
+      const comparable = !!entry?.digest && /^[0-9a-f]{8}$/.test(entry.digest); // provider-native digests (fly:…, sb:…) are not comparable
+      row.sinks.push({ id, present: !!entry, comparable, verifiable: adapter.verifiable });
       if (!entry) findings.push({ kind: "missing", secret: name, sink: id });
-      else if (entry.digest && /^[0-9a-f]{8}$/.test(entry.digest)) digests.set(id, entry.digest); // provider-native digests (fly:…) are not comparable
+      else if (comparable) digests.set(id, entry.digest as string);
     }
     const distinct = new Set(digests.values());
-    if (distinct.size > 1) findings.push({ kind: "drift", secret: name, sinks: [...digests.keys()] });
+    if (distinct.size > 1) {
+      findings.push({ kind: "drift", secret: name, sinks: [...digests.keys()] });
+      for (const s of row.sinks) if (digests.has(s.id)) s.drift = true;
+    }
 
     if (spec.rotate_every) {
       const limitDays = Math.round(intervalMs(spec.rotate_every) / 86_400_000);
@@ -95,7 +99,7 @@ export function formatAudit(r: AuditResult): string {
   for (const row of r.rows) {
     const age = row.ageDays === undefined ? "?" : `${row.ageDays}d`;
     const sinks = row.sinks
-      .map((s) => `${s.present ? "✓" : "✗"}${s.id}${s.digest ? `@${s.digest}` : s.verifiable ? "" : "(wo)"}`)
+      .map((s) => `${s.present ? (s.drift ? "≠" : "✓") : "✗"}${s.id}${s.verifiable ? "" : "(wo)"}`)
       .join("  ");
     lines.push(`${row.secret.padEnd(w)}  ${row.issuer.padEnd(10)}  ${age.padStart(6)}  ${(row.rotateEvery ?? "-").padStart(6)}  ${sinks}`);
   }

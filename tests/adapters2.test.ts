@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { flyAdapter } from "../src/adapters/fly.js";
 import { vercelAdapter } from "../src/adapters/vercel.js";
 import { parseSinkArg } from "../src/sinkarg.js";
-import { fakeExec } from "../src/exec.js";
+import { fakeExec } from "./helpers.js";
 import { digestOf } from "../src/state.js";
 
 describe("fly adapter", () => {

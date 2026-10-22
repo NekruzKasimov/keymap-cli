@@ -9,6 +9,34 @@ const SINKS = new Set(["local", "github", "railway", "vercel", "fly", "cloudflar
 
 export class ManifestError extends Error {}
 
+/**
+ * Sink field values become CLI arguments (--service X, --app X, ...). They may not start with "-"
+ * (so a manifest edit cannot smuggle a flag into another CLI) and are limited to the characters
+ * host identifiers actually use.
+ */
+const FIELD_RE = /^[A-Za-z0-9][A-Za-z0-9._/+-]{0,199}$/;
+/** A local sink may only point at a dotenv-style file inside the project. */
+const LOCAL_FILE_RE = /^(?:[A-Za-z0-9._-]+\/)*\.env(?:\.[A-Za-z0-9._-]+)?$/;
+
+function checkFields(kind: string, fields: Record<string, unknown>, path: string): Record<string, string | string[]> {
+  const out: Record<string, string | string[]> = {};
+  for (const [k, v] of Object.entries(fields)) {
+    if (k === "kind") continue;
+    if (!/^[a-z_]+$/.test(k)) throw new ManifestError(`${path}.${k}: unknown field`);
+    const vals = Array.isArray(v) ? v : [v];
+    for (const x of vals) {
+      if (typeof x !== "string") throw new ManifestError(`${path}.${k}: must be a string or list of strings`);
+      if (kind === "local" && k === "file") {
+        if (!LOCAL_FILE_RE.test(x) || x.includes("..")) throw new ManifestError(`${path}.file: must be a .env-style file inside the project, e.g. .env or config/.env.production`);
+      } else if (!FIELD_RE.test(x)) {
+        throw new ManifestError(`${path}.${k}: "${x}" is not a valid identifier (letters, digits, . _ / + -; may not start with -)`);
+      }
+    }
+    out[k] = v as string | string[];
+  }
+  return out;
+}
+
 /** Names that are config, not secrets. `init` skips them and `audit` does not report them as unmapped. */
 export const NOISE = /^(NODE_ENV|PORT|HOST|HOSTNAME|PATH|HOME|TZ|LANG|LC_|CI|DEBUG|LOG_LEVEL|NEXT_PUBLIC_|VITE_|PUBLIC_|RAILWAY_|VERCEL_)/;
 
@@ -28,7 +56,7 @@ function normaliseSink(raw: unknown, path: string): SinkRef {
   const obj = raw as Record<string, unknown>;
   if (typeof obj.kind === "string") {
     if (!SINKS.has(obj.kind)) throw new ManifestError(`${path}: unknown sink kind "${obj.kind}"`);
-    return obj as SinkRef;
+    return { kind: obj.kind as SinkRef["kind"], ...checkFields(obj.kind, obj, path) };
   }
   const keys = Object.keys(obj);
   if (keys.length !== 1) throw new ManifestError(`${path}: sink mapping must have exactly one key (the sink kind)`);
@@ -36,11 +64,7 @@ function normaliseSink(raw: unknown, path: string): SinkRef {
   if (!SINKS.has(kind)) throw new ManifestError(`${path}: unknown sink kind "${kind}"`);
   const inner = obj[kind];
   const fields = inner && typeof inner === "object" ? (inner as Record<string, unknown>) : {};
-  for (const [k, v] of Object.entries(fields)) {
-    if (typeof v !== "string" && !(Array.isArray(v) && v.every((x) => typeof x === "string")))
-      throw new ManifestError(`${path}.${k}: must be a string or list of strings`);
-  }
-  return { kind: kind as SinkRef["kind"], ...(fields as Record<string, string | string[]>) };
+  return { kind: kind as SinkRef["kind"], ...checkFields(kind, fields, path) };
 }
 
 export function validateManifest(raw: unknown): Manifest {
@@ -57,6 +81,7 @@ export function validateManifest(raw: unknown): Manifest {
   }
   const secrets: Record<string, SecretSpec> = {};
   for (const [name, specRaw] of Object.entries(secretsRaw as Record<string, unknown>)) {
+    if (!Object.hasOwn(secretsRaw, name)) continue;
     if (!/^[A-Z_][A-Z0-9_]*$/.test(name)) throw new ManifestError(`secrets.${name}: name must be UPPER_SNAKE_CASE`);
     if (!specRaw || typeof specRaw !== "object") throw new ManifestError(`secrets.${name}: must be a mapping`);
     const s = specRaw as Record<string, unknown>;
@@ -70,6 +95,11 @@ export function validateManifest(raw: unknown): Manifest {
     secrets[name] = { issuer: issuer as SecretSpec["issuer"], rotate_every: s.rotate_every as string | undefined, sinks };
   }
   return { version: 1, project: m.project, ...(ignore.length ? { ignore } : {}), secrets };
+}
+
+/** Own-property lookup so names like "constructor" or "__proto__" never resolve to inherited junk. */
+export function getSecret(m: Manifest, name: string): SecretSpec | undefined {
+  return Object.hasOwn(m.secrets, name) ? m.secrets[name] : undefined;
 }
 
 export async function loadManifest(path = MANIFEST_FILE): Promise<Manifest> {

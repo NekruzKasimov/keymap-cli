@@ -26,11 +26,14 @@ export interface InitOptions {
 export interface InitResult {
   manifest: Manifest;
   perSink: Array<{ id: string; count: number; error?: string }>;
+  /** Names that are not UPPER_SNAKE_CASE and therefore cannot be mapped. */
+  skipped: string[];
 }
 
 export async function buildManifest(opts: InitOptions, ctx: AdapterContext): Promise<InitResult> {
   const secrets: Manifest["secrets"] = {};
   const perSink: InitResult["perSink"] = [];
+  const skipped: string[] = [];
   for (const ref of opts.sinks) {
     const adapter = adapterFor(ref.kind);
     const id = adapter.id(ref);
@@ -39,6 +42,7 @@ export async function buildManifest(opts: InitOptions, ctx: AdapterContext): Pro
       let count = 0;
       for (const { name } of entries) {
         if (!opts.all && isIgnored(name)) continue;
+        if (!/^[A-Z_][A-Z0-9_]*$/.test(name)) { skipped.push(`${id}: ${name}`); continue; }
         count++;
         const spec = (secrets[name] ??= { issuer: guessIssuer(name), rotate_every: "90d", sinks: [] });
         if (!spec.sinks.some((s) => adapter.id(s) === id)) spec.sinks.push(ref);
@@ -49,7 +53,7 @@ export async function buildManifest(opts: InitOptions, ctx: AdapterContext): Pro
     }
   }
   const ordered = Object.fromEntries(Object.entries(secrets).sort(([a], [b]) => a.localeCompare(b)));
-  return { manifest: { version: 1, project: opts.project, secrets: ordered }, perSink };
+  return { manifest: { version: 1, project: opts.project, secrets: ordered }, perSink, skipped };
 }
 
 export async function runInit(opts: InitOptions, ctx: AdapterContext): Promise<InitResult> {

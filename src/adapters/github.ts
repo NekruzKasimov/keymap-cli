@@ -1,3 +1,4 @@
+import { cliError, parseJsonSafe } from "../exec.js";
 import type { AdapterContext, SinkAdapter, SinkEntry, SinkRef } from "../types.js";
 
 /**
@@ -18,14 +19,14 @@ export const githubAdapter: SinkAdapter = {
   id: (ref) => `github:${(ref.repo as string) ?? "."}${ref.env ? `/${ref.env}` : ""}`,
   async list(ref: SinkRef, ctx: AdapterContext): Promise<SinkEntry[]> {
     const r = await ctx.exec("gh", ["secret", "list", "--json", "name", ...repoArgs(ref), ...envArgs(ref)], { cwd: ctx.cwd });
-    if (r.code !== 0) throw new Error(`gh secret list failed: ${r.stderr.trim() || r.stdout.trim()}`);
-    const rows = JSON.parse(r.stdout || "[]") as Array<{ name: string }>;
+    if (r.code !== 0) throw cliError("gh secret list", r, { stdoutSafe: true });
+    const rows = parseJsonSafe<Array<{ name: string }>>(r.stdout || "[]", "gh secret list");
     return rows.map((x) => ({ name: x.name }));
   },
   async set(ref, name, value, ctx) {
     // Value goes through stdin: never on argv (visible in `ps`), never through a shell.
     const r = await ctx.exec("gh", ["secret", "set", name, ...repoArgs(ref), ...envArgs(ref)], { stdin: value, cwd: ctx.cwd });
-    if (r.code !== 0) throw new Error(`gh secret set ${name} failed: ${r.stderr.trim() || r.stdout.trim()}`);
+    if (r.code !== 0) throw cliError(`gh secret set ${name}`, r, { stdoutSafe: true, redact: [value] });
     return { name };
   },
 };

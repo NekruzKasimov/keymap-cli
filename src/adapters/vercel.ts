@@ -1,3 +1,4 @@
+import { cliError, parseJsonSafe } from "../exec.js";
 import { digestOf } from "../state.js";
 import type { AdapterContext, SinkAdapter, SinkEntry, SinkRef } from "../types.js";
 
@@ -29,8 +30,8 @@ export const vercelAdapter: SinkAdapter = {
   async list(ref: SinkRef, ctx: AdapterContext): Promise<SinkEntry[]> {
     const want = new Set(targets(ref));
     const r = await ctx.exec("vercel", ["env", "list", "--json", "--non-interactive", ...projectArgs(ref)], { cwd: ctx.cwd });
-    if (r.code !== 0) throw new Error(`vercel env list failed: ${r.stderr.trim() || r.stdout.trim()}`);
-    const parsed = JSON.parse(r.stdout || "[]") as VercelEnvRow[] | { envs?: VercelEnvRow[] };
+    if (r.code !== 0) throw cliError("vercel env list", r);
+    const parsed = parseJsonSafe<VercelEnvRow[] | { envs?: VercelEnvRow[] }>(r.stdout || "[]", "vercel env list");
     const rows = Array.isArray(parsed) ? parsed : (parsed.envs ?? []);
     const out = new Map<string, SinkEntry>();
     for (const row of rows) {
@@ -47,7 +48,7 @@ export const vercelAdapter: SinkAdapter = {
       ["env", "add", name, "--environment", targets(ref).join(","), "--force", "--non-interactive", ...projectArgs(ref)],
       { stdin: value, cwd: ctx.cwd }
     );
-    if (r.code !== 0) throw new Error(`vercel env add ${name} failed: ${r.stderr.trim() || r.stdout.trim()}`);
+    if (r.code !== 0) throw cliError(`vercel env add ${name}`, r, { stdoutSafe: true, redact: [value] });
     return { name, digest: digestOf(value) };
   },
 };

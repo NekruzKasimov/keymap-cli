@@ -33,7 +33,7 @@ export async function createKey(mgmt: string, opts: CreateOptions, fetchFn: Fetc
   const text = await r.text();
   if (!r.ok) throw new Error(`OpenRouter create key failed (${r.status}): ${text.slice(0, 200)}`);
   const j = JSON.parse(text) as { key?: string; data?: { hash?: string; name?: string } };
-  if (!j.key || !j.data?.hash) throw new Error("OpenRouter create key: unexpected response shape");
+  if (!j.key || !j.data?.hash) throw new Error("OpenRouter create key: unexpected response shape. A key may have been created; check https://openrouter.ai/settings/keys");
   return { key: j.key, hash: j.data.hash, name: j.data.name ?? opts.name };
 }
 

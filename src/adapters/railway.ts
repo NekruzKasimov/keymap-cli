@@ -1,3 +1,4 @@
+import { cliError, parseJsonSafe } from "../exec.js";
 import { digestOf } from "../state.js";
 import type { AdapterContext, SinkAdapter, SinkEntry, SinkRef } from "../types.js";
 
@@ -22,8 +23,8 @@ export const railwayAdapter: SinkAdapter = {
   id: (ref) => `railway:${(ref.service as string) ?? "linked"}${ref.environment ? `/${ref.environment}` : ""}`,
   async list(ref: SinkRef, ctx: AdapterContext): Promise<SinkEntry[]> {
     const r = await ctx.exec("railway", ["variable", "list", "--json", ...scope(ref)], { cwd: ctx.cwd });
-    if (r.code !== 0) throw new Error(`railway variable list failed: ${r.stderr.trim() || r.stdout.trim()}`);
-    const obj = JSON.parse(r.stdout || "{}") as Record<string, string | null>;
+    if (r.code !== 0) throw cliError("railway variable list", r);
+    const obj = parseJsonSafe<Record<string, string | null>>(r.stdout || "{}", "railway variable list");
     return Object.entries(obj)
       .filter(([name]) => !name.startsWith("RAILWAY_"))
       .map(([name, value]) => (value === null ? { name } : { name, digest: digestOf(value) }));
@@ -33,7 +34,7 @@ export const railwayAdapter: SinkAdapter = {
       stdin: value,
       cwd: ctx.cwd,
     });
-    if (r.code !== 0) throw new Error(`railway variable set ${name} failed: ${r.stderr.trim() || r.stdout.trim()}`);
+    if (r.code !== 0) throw cliError(`railway variable set ${name}`, r, { redact: [value] });
     return { name, digest: digestOf(value) };
   },
 };
