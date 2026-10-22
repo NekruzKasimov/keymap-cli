@@ -9,7 +9,7 @@ import { formatRotate, runRevoke, runRotate } from "./commands/rotate.js";
 import { buildReminder, postReminder } from "./commands/remind.js";
 import { formatDoctor, runDoctor } from "./commands/doctor.js";
 import { readFile } from "node:fs/promises";
-import { askHidden, readStdin } from "./prompt.js";
+import { Prompter, readStdin } from "./prompt.js";
 import { getSecret } from "./manifest.js";
 import type { SinkKind, State } from "./types.js";
 import { realExec } from "./exec.js";
@@ -69,7 +69,15 @@ program
     let value: string | undefined;
     if (!o.generate && !o.mint && !o.dryRun) {
       if (o.valueFile) value = (await readFile(o.valueFile, "utf8")).replace(/\r?\n$/, "");
-      else value = (await readStdin()) ?? (await askHidden(`New value for ${secret} (not echoed): `));
+      else {
+        const piped = await readStdin();
+        if (piped === "") throw new Error("stdin was empty; no value to rotate to");
+        if (piped !== undefined) value = piped;
+        else {
+          const p = new Prompter();
+          try { value = await p.askHidden(`New value for ${secret} (not echoed): `); } finally { p.close(); }
+        }
+      }
     }
     const persist = (st: State) => saveState(path, st);
     const r = await runRotate(manifest, state, { secret, value, generate: o.generate, mint: o.mint, limit: o.limit, limitReset: o.limitReset, dryRun: o.dryRun, persist }, ctx);
@@ -109,30 +117,39 @@ program
     if (!o.walk || !items.length) return;
     const path = statePath(manifest.project);
     const state = await loadState(path);
+    const p = new Prompter();
     const prompt = async (item: IncidentItem) => {
       console.log("");
-      const a = await askHidden(`New value for ${item.secret} (${item.issuer}; create it at the issuer first; not echoed). Enter = skip, q = stop: `);
+      let a: string;
+      try {
+        a = await p.askHidden(`New value for ${item.secret} (${item.issuer}; create it at the issuer first; not echoed). Enter = skip, q = stop: `);
+      } catch {
+        return null; // input ended: stop the walk, report what is still exposed
+      }
       if (a.trim().toLowerCase() === "q") return null;
       return a.trim() || undefined;
     };
-    const w = await walkIncident(manifest, state, items, prompt, ctx, (st) => saveState(path, st), async (r) => { console.log(formatRotate(r)); });
-    console.log(formatWalk(w, items));
-    process.exitCode = w.failed.length || w.stoppedEarly ? 1 : 0;
+    try {
+      const w = await walkIncident(manifest, state, items, prompt, ctx, (st) => saveState(path, st), async (r) => { console.log(formatRotate(r)); });
+      console.log(formatWalk(w, items));
+      process.exitCode = w.failed.length || w.stoppedEarly ? 1 : 0;
+    } finally {
+      p.close();
+    }
   });
 
 program
   .command("remind")
-  .description("Run the audit and post a one-message summary to a Slack or Discord webhook (names only, never values)")
-  .option("--webhook <url>", "incoming webhook URL (or KEYMAP_WEBHOOK env)")
+  .description("Run the audit and post a one-message summary to the Slack or Discord webhook in KEYMAP_WEBHOOK (names only, never values)")
   .option("--always", "post even when there is nothing to report")
-  .action(async (o: { webhook?: string; always?: boolean }) => {
-    const webhook = o.webhook ?? process.env.KEYMAP_WEBHOOK;
+  .action(async (o: { always?: boolean }) => {
+    const webhook = process.env.KEYMAP_WEBHOOK; // env only: a URL on argv shows up in `ps` and shell history
     const manifest = await loadManifest();
     const state = await loadState(statePath(manifest.project));
     const r = await runAudit(manifest, state, ctx);
     const { text, count } = buildReminder(manifest.project, r);
     if (!count && !o.always) { console.log(text, "(nothing posted)"); return; }
-    if (!webhook) { console.log(text); console.log("\n(no --webhook / KEYMAP_WEBHOOK given, printed instead)"); process.exitCode = r.failed ? 1 : 0; return; }
+    if (!webhook) { console.log(text); console.log("\n(KEYMAP_WEBHOOK not set, printed instead)"); process.exitCode = r.failed ? 1 : 0; return; }
     await postReminder(webhook, text);
     console.log(`posted ${count} line${count === 1 ? "" : "s"} to webhook`);
     process.exitCode = r.failed ? 1 : 0;

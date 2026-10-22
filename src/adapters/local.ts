@@ -1,4 +1,4 @@
-import { chmod, lstat, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
 import { digestOf } from "../state.js";
 import type { AdapterContext, SinkAdapter, SinkEntry, SinkRef } from "../types.js";
@@ -25,13 +25,18 @@ export function parseDotenv(text: string): Array<{ name: string; value: string }
   return [...map].map(([name, value]) => ({ name, value }));
 }
 
-/** Render a value so dotenv reads it back byte-for-byte: single quotes when possible (no expansion), else double. */
+/**
+ * Render a value so every common dotenv reader (dotenv, godotenv, python-dotenv) gets it back byte-for-byte.
+ * Single quotes are literal everywhere, so they are used whenever the value has no single quote. A value with a
+ * single quote must go in double quotes, where readers disagree about backslashes, `$` and `"`; such values are
+ * refused rather than stored wrong.
+ */
 export function renderDotenvValue(value: string): string {
-  if (value === "" || /[\s#"'$\\]/.test(value)) {
-    if (!value.includes("'")) return `'${value}'`;
-    return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
-  }
-  return value;
+  if (/[\r\n]/.test(value)) throw new Error("values with newlines cannot be stored in dotenv format");
+  if (value !== "" && !/[\s#"'$\\`]/.test(value)) return value;
+  if (!value.includes("'")) return `'${value}'`;
+  if (/["$\\`]/.test(value)) throw new Error("value mixes a single quote with \" $ \\ or `, which dotenv readers parse differently; choose a value without that mix");
+  return `"${value}"`;
 }
 
 /** Replace every line that sets `name`, keeping all other lines byte-for-byte; append when absent. */
@@ -65,6 +70,12 @@ export async function resolveLocalFile(ref: SinkRef, ctx: AdapterContext, forWri
   const file = resolve(ctx.cwd, rel);
   const inside = relative(ctx.cwd, file);
   if (inside.startsWith("..") || inside.includes(`..${sep}`) || resolve(ctx.cwd, inside) !== file) throw new Error(`local sink ${rel} is outside the project directory`);
+  // Resolve symlinks in every parent component: a committed `config -> ../elsewhere` must not redirect the write.
+  const realRoot = await realpath(ctx.cwd);
+  const realDir = await realpath(dirname(file)).catch(() => undefined);
+  if (realDir === undefined) throw new Error(`local sink ${rel}: directory does not exist`);
+  const dirInside = relative(realRoot, realDir);
+  if (dirInside.startsWith("..") || resolve(realRoot, dirInside) !== realDir) throw new Error(`local sink ${rel} resolves outside the project directory (symlinked parent)`);
   try {
     const st = await lstat(file);
     if (st.isSymbolicLink()) throw new Error(`local sink ${rel} is a symlink; refusing`);
@@ -72,11 +83,13 @@ export async function resolveLocalFile(ref: SinkRef, ctx: AdapterContext, forWri
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
   }
-  if (forWrite) {
+  if (forWrite && !process.env.KEYMAP_ALLOW_TRACKED_ENV) {
     const g = await ctx.exec("git", ["check-ignore", "-q", "--", inside], { cwd: ctx.cwd });
-    // 0 = ignored (good). 1 = tracked or would be committed. 128 = not a git repo (fine). 127 = no git (fine).
-    if (g.code === 1 && !process.env.KEYMAP_ALLOW_TRACKED_ENV) {
-      throw new Error(`${rel} is not git-ignored; a rotated secret written there could be committed. Add it to .gitignore (or set KEYMAP_ALLOW_TRACKED_ENV=1 to override)`);
+    // 0 = ignored (good). 1 = would be committed. 127 = no git. 128 = not a repo, OR git refused the path.
+    if (g.code === 1) throw new Error(`${rel} is not git-ignored; a rotated secret written there could be committed. Add it to .gitignore (or set KEYMAP_ALLOW_TRACKED_ENV=1 to override)`);
+    if (g.code === 128) {
+      const inRepo = await ctx.exec("git", ["rev-parse", "--is-inside-work-tree"], { cwd: ctx.cwd });
+      if (inRepo.code === 0) throw new Error(`git refused to check ${rel} (${g.stderr.trim().slice(0, 120) || "exit 128"}); refusing to write`);
     }
   }
   return file;
@@ -84,6 +97,7 @@ export async function resolveLocalFile(ref: SinkRef, ctx: AdapterContext, forWri
 
 export const localAdapter: SinkAdapter = {
   kind: "local",
+  tokens: [],
   verifiable: true,
   id: (ref) => `local:${(ref.file as string) ?? ".env"}`,
   async list(ref: SinkRef, ctx: AdapterContext): Promise<SinkEntry[]> {
@@ -97,7 +111,7 @@ export const localAdapter: SinkAdapter = {
     return parseDotenv(text).map(({ name, value }) => ({ name, digest: digestOf(value) }));
   },
   async set(ref, name, value, ctx) {
-    if (/[\r\n]/.test(value)) throw new Error(`${name}: values with newlines cannot be stored in a .env file`);
+    renderDotenvValue(value); // validate before touching anything
     const file = await resolveLocalFile(ref, ctx, true);
     let text = "";
     try {

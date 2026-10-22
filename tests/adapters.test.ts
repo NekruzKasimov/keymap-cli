@@ -26,7 +26,8 @@ describe("local adapter", () => {
     expect(upsertDotenv(t, "B", "new")).toBe(`# header\nA=1\nexport B=new\n`);
     expect(upsertDotenv(t, "Z", "has space")).toBe(`# header\nA=1\nexport B=old\nZ='has space'\n`);
     expect(upsertDotenv("A=1\nA=2\n", "A", "3")).toBe("A=3\nA=3\n");
-    expect(upsertDotenv("", "Q", `it's $x`)).toBe(`Q="it's $x"\n`);
+    expect(upsertDotenv("", "Q", `it's x`)).toBe(`Q="it's x"\n`);
+    expect(() => upsertDotenv("", "Q", `it's $x`)).toThrow(/parse differently/);
     expect(upsertDotenv("", "A", "x")).toBe(`A=x\n`);
   });
 

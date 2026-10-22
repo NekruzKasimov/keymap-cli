@@ -6,6 +6,9 @@ import { localAdapter, renderDotenvValue } from "../src/adapters/local.js";
 import { railwayAdapter } from "../src/adapters/railway.js";
 import { supabaseAdapter } from "../src/adapters/supabase.js";
 import { childEnv, cliError, parseJsonSafe } from "../src/exec.js";
+import { Prompter, readStdin } from "../src/prompt.js";
+import { PassThrough } from "node:stream";
+import { mkdir } from "node:fs/promises";
 import { validateManifest } from "../src/manifest.js";
 import { digestOf, loadState, saveState, statePath } from "../src/state.js";
 import { fakeExec } from "./helpers.js";
@@ -34,19 +37,64 @@ describe("values never reach error text", () => {
     expect(e.digest).toBe(`sb:${digestOf("sk-raw")}`);
     expect(e.digest).not.toContain("sk-raw");
   });
-  it("supabase env-file values are dotenv-quoted", () => {
+  it("dotenv rendering is reader-agnostic or refuses", () => {
     expect(renderDotenvValue("a b # c")).toBe("'a b # c'");
     expect(renderDotenvValue("plain")).toBe("plain");
+    expect(renderDotenvValue("has$dollar")).toBe("'has$dollar'");
+    expect(renderDotenvValue("it's fine")).toBe(`"it's fine"`);
+    expect(() => renderDotenvValue(`it's $bad`)).toThrow(/parse differently/);
+    expect(() => renderDotenvValue("x\ny")).toThrow(/newlines/);
   });
 });
 
 describe("child environment", () => {
-  it("drops KEYMAP_* and keeps the rest", () => {
-    const env = childEnv({ PATH: "/usr/bin", KEYMAP_OPENROUTER_MGMT_KEY: "m", KEYMAP_WEBHOOK: "w", HOME: "/h" });
+  it("drops KEYMAP_* and every host token except the ones requested", () => {
+    const src = { PATH: "/usr/bin", KEYMAP_OPENROUTER_MGMT_KEY: "m", KEYMAP_WEBHOOK: "w", HOME: "/h", RAILWAY_TOKEN: "r", VERCEL_TOKEN: "v", GH_TOKEN: "g" };
+    const env = childEnv(src, ["RAILWAY_TOKEN"]);
     expect(env.KEYMAP_OPENROUTER_MGMT_KEY).toBeUndefined();
     expect(env.KEYMAP_WEBHOOK).toBeUndefined();
+    expect(env.RAILWAY_TOKEN).toBe("r");
+    expect(env.VERCEL_TOKEN).toBeUndefined();
+    expect(env.GH_TOKEN).toBeUndefined();
     expect(env.HOME).toBe("/h");
     expect(env.PATH?.startsWith("/usr/bin")).toBe(true);
+    expect(childEnv(src).RAILWAY_TOKEN).toBeUndefined();
+  });
+  it("adapters request only their own tokens", async () => {
+    const { railwayAdapter } = await import("../src/adapters/railway.js");
+    const exec = fakeExec([{ cmd: "railway", result: { stdout: "{}" } }]);
+    const calls: unknown[] = [];
+    const spy: typeof exec = Object.assign(async (c: string, a: string[], o?: { tokens?: string[] }) => { calls.push(o?.tokens); return exec(c, a, o); }, { calls: exec.calls });
+    await railwayAdapter.list({ kind: "railway" }, { exec: spy, cwd: "/x" });
+    expect(calls).toEqual([["RAILWAY_TOKEN", "RAILWAY_API_TOKEN"]]);
+  });
+});
+
+describe("prompter", () => {
+  function fakeIO() {
+    const input = new PassThrough() as unknown as NodeJS.ReadStream;
+    (input as unknown as { isTTY: boolean }).isTTY = false;
+    let out = "";
+    const output = { write: (c: string) => { out += c; return true; } } as unknown as NodeJS.WriteStream;
+    return { input, output, out: () => out };
+  }
+  it("reads several piped lines through one interface and errors when input ends", async () => {
+    const io = fakeIO();
+    const p = new Prompter(io.input, io.output);
+    (io.input as unknown as PassThrough).end("first-value\nsecond-value\n");
+    expect(await p.askHidden("A? ")).toBe("first-value");
+    expect(await p.askHidden("B? ")).toBe("second-value");
+    await expect(p.askHidden("C? ")).rejects.toThrow(/input ended/);
+    expect(io.out()).not.toContain("first-value");
+    p.close();
+  });
+  it("readStdin distinguishes empty pipe from TTY", async () => {
+    const io = fakeIO();
+    (io.input as unknown as PassThrough).end("");
+    expect(await readStdin(io.input)).toBe("");
+    const tty = new PassThrough() as unknown as NodeJS.ReadStream;
+    (tty as unknown as { isTTY: boolean }).isTTY = true;
+    expect(await readStdin(tty)).toBeUndefined();
   });
 });
 
@@ -90,6 +138,19 @@ describe("local sink safety", () => {
     expect(await readFile(join(dir2, ".env"), "utf8")).toBe("A=2\n");
     expect((await stat(join(dir2, ".env"))).mode & 0o777).toBe(0o600);
     await expect(localAdapter.set({ kind: "local" }, "A", "x\ny", { exec: ok, cwd: dir2 })).rejects.toThrow(/newlines/);
+  });
+  it("refuses a symlinked parent directory and a git pathspec refusal inside a repo", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "keymap-out-"));
+    const dir = await mkdtemp(join(tmpdir(), "keymap-"));
+    await symlink(outside, join(dir, "config"));
+    const ok = fakeExec([]);
+    await expect(localAdapter.set({ kind: "local", file: "config/.env" }, "A", "v", { exec: ok, cwd: dir })).rejects.toThrow(/symlinked parent/);
+    await expect(localAdapter.list({ kind: "local", file: "config/.env" }, { exec: ok, cwd: dir })).rejects.toThrow(/symlinked parent/);
+
+    const dir2 = await mkdtemp(join(tmpdir(), "keymap-"));
+    await mkdir(join(dir2, "config"));
+    const refuse = fakeExec([{ cmd: "git", args: ["check-ignore"], result: { code: 128, stderr: "fatal: pathspec is beyond a symbolic link" } }, { cmd: "git", args: ["rev-parse"], result: { code: 0, stdout: "true" } }]);
+    await expect(localAdapter.set({ kind: "local", file: "config/.env" }, "A", "v", { exec: refuse, cwd: dir2 })).rejects.toThrow(/git refused/);
   });
   it("works outside a git repo (exit 128) and without git (exit 127)", async () => {
     for (const code of [128, 127]) {

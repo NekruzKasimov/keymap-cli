@@ -32,7 +32,12 @@ export async function createKey(mgmt: string, opts: CreateOptions, fetchFn: Fetc
   const r = await fetchFn(BASE, { method: "POST", headers: { Authorization: `Bearer ${mgmt}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const text = await r.text();
   if (!r.ok) throw new Error(`OpenRouter create key failed (${r.status}): ${text.slice(0, 200)}`);
-  const j = JSON.parse(text) as { key?: string; data?: { hash?: string; name?: string } };
+  let j: { key?: string; data?: { hash?: string; name?: string } };
+  try {
+    j = JSON.parse(text) as typeof j;
+  } catch {
+    throw new Error("OpenRouter create key: unparseable response. A key may have been created; check https://openrouter.ai/settings/keys");
+  }
   if (!j.key || !j.data?.hash) throw new Error("OpenRouter create key: unexpected response shape. A key may have been created; check https://openrouter.ai/settings/keys");
   return { key: j.key, hash: j.data.hash, name: j.data.name ?? opts.name };
 }
@@ -41,7 +46,12 @@ export async function listKeys(mgmt: string, fetchFn: FetchLike = fetch as unkno
   const r = await fetchFn(BASE, { method: "GET", headers: { Authorization: `Bearer ${mgmt}` } });
   const text = await r.text();
   if (!r.ok) throw new Error(`OpenRouter list keys failed (${r.status}): ${text.slice(0, 200)}`);
-  const j = JSON.parse(text) as { data?: Array<{ hash: string; name: string; disabled?: boolean }> };
+  let j: { data?: Array<{ hash: string; name: string; disabled?: boolean }> };
+  try {
+    j = JSON.parse(text) as typeof j;
+  } catch {
+    throw new Error("OpenRouter list keys: unparseable response");
+  }
   return j.data ?? [];
 }
 

@@ -27,7 +27,7 @@ keymap revoke OPENROUTER_API_KEY         # after every host redeployed: delete t
 keymap incident railway         # a host was breached: what lives there, most dangerous first
 keymap incident railway --walk  # ...and rotate each one in turn
 keymap doctor                   # which host CLIs are installed and logged in
-keymap remind --webhook $SLACK  # post the audit summary to Slack or Discord (names only)
+KEYMAP_WEBHOOK=https://hooks.slack.com/... keymap remind   # post the audit summary (names only)
 ```
 
 ## Run it every day
@@ -72,7 +72,7 @@ secrets:
 
 Commit this file, and review changes to it like code: a sink added here receives the next rotated value. Local sinks may only point at `.env`-style files inside the project, and `rotate` refuses to write one that git would commit.
 
-State (`~/.keymap/<project>-<hash>.state.json`, mode 600) stays on your machine. It records timestamps, salted hash prefixes, and for minted keys the issuer's key id, never a value.
+State (`~/.keymap/<project>-<hash>.state.json`, mode 600) stays on your machine and is keyed by the checkout's path: move the folder and keymap starts a fresh state (run `keymap revoke --hash` by hand for any key it was tracking). It records timestamps, salted hash prefixes, and for minted keys the issuer's key id, never a value.
 
 ## What audit checks
 
@@ -85,7 +85,7 @@ State (`~/.keymap/<project>-<hash>.state.json`, mode 600) stays on your machine.
 | UNMAPPED | a sink has a name that is not in the manifest or `ignore` |
 | ERROR | a host CLI failed (not logged in, etc.) |
 
-GitHub Actions and Cloudflare secrets are write-only, so they show as `(wo)`: presence is checked, drift is not. Fly and Supabase expose their own digests, which keymap shows but cannot compare with other sinks.
+GitHub Actions and Cloudflare secrets are write-only, so they show as `(wo)`: presence is checked, drift is not. Fly and Supabase expose only their own digests, which cannot be compared with other sinks, so drift is not checked there either.
 
 ## Sinks
 
@@ -99,12 +99,13 @@ GitHub Actions and Cloudflare secrets are write-only, so they show as `(wo)`: pr
 | cloudflare | `cloudflare:worker[/env]` | `wrangler secret list` | `wrangler secret put` (stdin) |
 | supabase | `supabase:projectref` | `supabase secrets list -o json` | `supabase secrets set --env-file` (mode-600 temp file) |
 
-Every adapter shells out to the official CLI you are already logged into, with a 2-minute timeout and without keymap's own environment variables. Nothing is proxied, no value touches a shell string or argv, and CLI error text is redacted and never includes a listing's stdout.
+Every adapter shells out to the official CLI you are already logged into, with a 2-minute timeout, seeing only its own host's token and none of keymap's own environment variables. Nothing is proxied, no value touches a shell string or argv, and CLI error text is redacted and never includes a listing's stdout.
 
 ## Security notes
 
 - Reviewed 2026-10-22 against a written threat model (value leakage, injection, file safety, supply chain, rotation logic). Findings and fixes are in the commit history.
-- `--mint` records the new key's id before pushing, deletes it again if the rotation fails part-way, and leaves the previous key live until you run `revoke`.
+- `--mint` records the new key's id before pushing and leaves the previous key live until you run `revoke`. If a rotation fails part-way the minted key stays live too (some sinks already hold it) and is deleted by the next successful `--mint`. A second `--mint` is refused until the previous key has been revoked.
+- Each host CLI runs with only its own credential variable; every other host token and all `KEYMAP_*` variables are stripped from its environment.
 - Hash prefixes are HMAC-SHA256 with a per-machine salt (`~/.keymap/.salt`), so they cannot be checked offline against a wordlist.
 - Report issues privately to the maintainer before opening a public issue.
 

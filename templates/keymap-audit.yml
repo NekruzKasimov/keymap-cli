@@ -1,12 +1,14 @@
 # Daily secret audit with keymap. Copy to .github/workflows/keymap-audit.yml
 #
-# Everything here is pinned: actions by commit SHA, npm packages by exact version, flyctl by release.
+# Everything here is pinned: actions by commit SHA (verified against upstream tags), npm packages by exact
+# version, flyctl by release. keymap-cli bundles its dependencies; the host CLIs resolve their own
+# transitive dependencies from npm, which is the residual supply-chain exposure of this job.
 # Bump the versions on purpose, not by accident. This job holds host tokens, so it must never
 # install anything unpinned.
 #
 # Repository secrets, only for the hosts your keymap.yaml references:
 #   KEYMAP_GH_TOKEN        fine-grained PAT, this repo only, permission "Secrets: read" (GITHUB_TOKEN cannot list secrets)
-#   RAILWAY_TOKEN          Railway -> Account -> Tokens (a read-only project token is enough for audit)
+#   RAILWAY_TOKEN          Railway -> Account -> Tokens (project token scoped to the one project)
 #   VERCEL_TOKEN           Vercel  -> Account -> Tokens; the Vercel CLI reads this variable
 #   FLY_API_TOKEN          `flyctl tokens create readonly`
 #   CLOUDFLARE_API_TOKEN   Workers Scripts: read
@@ -25,16 +27,18 @@ jobs:
     env:
       KEYMAP_VERSION: "0.1.0"
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
       - name: Install keymap and the host CLIs this manifest uses (exact versions, no install scripts)
         run: |
           set -euo pipefail
+          # keymap-cli bundles its two dependencies, so this installs exactly one package.
           npm i -g --ignore-scripts "keymap-cli@${KEYMAP_VERSION}"
           uses() { grep -Eq "^\s*-?\s*(${1}|kind: ${1})\b" keymap.yaml; }
-          uses railway    && npm i -g --ignore-scripts @railway/cli@5.71.0 || true
+          # @railway/cli downloads its binary in a postinstall step, so scripts stay enabled for that one package.
+          uses railway    && npm i -g @railway/cli@5.71.0 || true
           uses vercel     && npm i -g --ignore-scripts vercel@65.1.0 || true
           uses cloudflare && npm i -g --ignore-scripts wrangler@4.151.3 || true
           uses supabase   && npm i -g --ignore-scripts supabase@2.121.0 || true

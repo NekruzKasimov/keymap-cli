@@ -2,6 +2,8 @@ import { cliError, parseJsonSafe } from "../exec.js";
 import { digestOf } from "../state.js";
 import type { AdapterContext, SinkAdapter, SinkEntry, SinkRef } from "../types.js";
 
+
+const TOKENS = ["VERCEL_TOKEN"];
 /**
  * Vercel via `vercel env` (CLI 65.x). `env list --json` returns values for plain variables and a redacted
  * placeholder for sensitive ones, so a digest is given only when the value is readable. `env add --force`
@@ -25,11 +27,12 @@ interface VercelEnvRow {
 
 export const vercelAdapter: SinkAdapter = {
   kind: "vercel",
+  tokens: TOKENS,
   verifiable: true,
   id: (ref) => `vercel:${(ref.project as string) ?? "linked"}/${targets(ref).join("+")}`,
   async list(ref: SinkRef, ctx: AdapterContext): Promise<SinkEntry[]> {
     const want = new Set(targets(ref));
-    const r = await ctx.exec("vercel", ["env", "list", "--json", "--non-interactive", ...projectArgs(ref)], { cwd: ctx.cwd });
+    const r = await ctx.exec("vercel", ["env", "list", "--json", "--non-interactive", ...projectArgs(ref)], { cwd: ctx.cwd, tokens: TOKENS });
     if (r.code !== 0) throw cliError("vercel env list", r);
     const parsed = parseJsonSafe<VercelEnvRow[] | { envs?: VercelEnvRow[] }>(r.stdout || "[]", "vercel env list");
     const rows = Array.isArray(parsed) ? parsed : (parsed.envs ?? []);
@@ -46,7 +49,7 @@ export const vercelAdapter: SinkAdapter = {
     const r = await ctx.exec(
       "vercel",
       ["env", "add", name, "--environment", targets(ref).join(","), "--force", "--non-interactive", ...projectArgs(ref)],
-      { stdin: value, cwd: ctx.cwd }
+      { stdin: value, cwd: ctx.cwd, tokens: TOKENS }
     );
     if (r.code !== 0) throw cliError(`vercel env add ${name}`, r, { stdoutSafe: true, redact: [value] });
     return { name, digest: digestOf(value) };

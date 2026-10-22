@@ -2,6 +2,8 @@ import { cliError, parseJsonSafe } from "../exec.js";
 import { digestOf } from "../state.js";
 import type { AdapterContext, SinkAdapter, SinkEntry, SinkRef } from "../types.js";
 
+
+const TOKENS = ["RAILWAY_TOKEN", "RAILWAY_API_TOKEN"];
 /**
  * Railway via `railway variable` (CLI 5.x). `list --json` returns raw values, which we hash in-process
  * and discard; sealed variables come back as null and are listed without a digest.
@@ -19,10 +21,11 @@ function scope(ref: SinkRef): string[] {
 
 export const railwayAdapter: SinkAdapter = {
   kind: "railway",
+  tokens: TOKENS,
   verifiable: true,
   id: (ref) => `railway:${(ref.service as string) ?? "linked"}${ref.environment ? `/${ref.environment}` : ""}`,
   async list(ref: SinkRef, ctx: AdapterContext): Promise<SinkEntry[]> {
-    const r = await ctx.exec("railway", ["variable", "list", "--json", ...scope(ref)], { cwd: ctx.cwd });
+    const r = await ctx.exec("railway", ["variable", "list", "--json", ...scope(ref)], { cwd: ctx.cwd, tokens: TOKENS });
     if (r.code !== 0) throw cliError("railway variable list", r);
     const obj = parseJsonSafe<Record<string, string | null>>(r.stdout || "{}", "railway variable list");
     return Object.entries(obj)
@@ -33,6 +36,7 @@ export const railwayAdapter: SinkAdapter = {
     const r = await ctx.exec("railway", ["variable", "set", name, "--stdin", "--skip-deploys", "--json", ...scope(ref)], {
       stdin: value,
       cwd: ctx.cwd,
+      tokens: TOKENS,
     });
     if (r.code !== 0) throw cliError(`railway variable set ${name}`, r, { redact: [value] });
     return { name, digest: digestOf(value) };

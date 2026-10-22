@@ -44,10 +44,11 @@ export interface RotateResult {
 }
 
 /**
- * Push order: hosts that run code first (so a redeploy picks up the new value), CI second,
- * local file last (a half-done rotation should never leave the laptop ahead of production).
+ * Push order: hosts that STAGE the value (nothing changes until a redeploy) go first, so an early failure
+ * leaves nothing live on the new value. Hosts where a push takes effect immediately come next, then CI,
+ * then the local file last (a half-done rotation should never leave the laptop ahead of production).
  */
-const ORDER: Record<SinkRef["kind"], number> = { railway: 0, fly: 0, vercel: 0, cloudflare: 0, supabase: 0, github: 1, local: 2 };
+const ORDER: Record<SinkRef["kind"], number> = { railway: 0, fly: 0, vercel: 0, cloudflare: 1, supabase: 1, github: 2, local: 3 };
 
 export function orderSinks(sinks: SinkRef[]): SinkRef[] {
   return [...sinks].sort((a, b) => ORDER[a.kind] - ORDER[b.kind]);
@@ -87,13 +88,15 @@ export async function runRotate(manifest: Manifest, state: State, opts: RotateOp
       if (spec.issuer !== "openrouter") throw new Error(`--mint is only available for issuer "openrouter" (${opts.secret} is ${spec.issuer})`);
       mgmt = managementKey(opts.env);
       if (!mgmt) throw new Error("--mint needs KEYMAP_OPENROUTER_MGMT_KEY (an OpenRouter management key, not an inference key)");
+      const pre = state.secrets[opts.secret];
+      if (pre?.previous_issuer_ref) throw new Error(`${opts.secret}: the key from the last --mint (${pre.previous_issuer_ref}) has not been revoked yet. Run \`keymap revoke ${opts.secret}\` first, or \`--hash\` it if it is already gone`);
       const created = await createKey(mgmt, { name: `${manifest.project}/${opts.secret} ${new Date().toISOString().slice(0, 10)}`, limit: opts.limit, limitReset: opts.limitReset }, opts.fetchFn);
       value = created.key;
       mintedHash = created.hash;
       source = "mint";
       // Record the live key's handle BEFORE any push, so a crash cannot orphan it.
       const st = (state.secrets[opts.secret] ??= { sinks: {} });
-      st.pending_issuer_ref = mintedHash;
+      st.pending_issuer_refs = [...(st.pending_issuer_refs ?? []), mintedHash];
       await persist(state);
       issuerNotes.push(`minted OpenRouter key "${created.name}" (${created.hash})${opts.limit !== undefined ? ` with limit $${opts.limit}${opts.limitReset ? ` per ${{ daily: "day", weekly: "week", monthly: "month" }[opts.limitReset]}` : ""}` : " with NO credit limit"}`);
     } else if (opts.generate) {
@@ -145,7 +148,18 @@ export async function runRotate(manifest: Manifest, state: State, opts: RotateOp
         // Promote: the minted key is now current; the previous one stays live until `keymap revoke`.
         if (st.issuer_ref && st.issuer_ref !== mintedHash) st.previous_issuer_ref = st.issuer_ref;
         st.issuer_ref = mintedHash;
-        delete st.pending_issuer_ref;
+        // Every sink now holds the new key, so keys minted by earlier unfinished rotations are safe to delete.
+        const stale = (st.pending_issuer_refs ?? []).filter((h) => h !== mintedHash && h !== st.issuer_ref && h !== st.previous_issuer_ref);
+        st.pending_issuer_refs = [];
+        for (const h of stale) {
+          try {
+            await deleteKey(mgmt as string, h, opts.fetchFn);
+            issuerNotes.push(`deleted stale key ${h} left by an earlier unfinished rotation`);
+          } catch (e) {
+            st.pending_issuer_refs.push(h);
+            issuerNotes.push(`could not delete stale key ${h} (${(e as Error).message}); will retry on the next successful --mint`);
+          }
+        }
         if (st.previous_issuer_ref) {
           issuerNotes.push(`previous key ${st.previous_issuer_ref} is still live on purpose. After every host has redeployed, run: keymap revoke ${opts.secret}`);
         } else {
@@ -160,15 +174,15 @@ export async function runRotate(manifest: Manifest, state: State, opts: RotateOp
       }
       await persist(state);
     } else if (mintedHash) {
-      // Pushes failed part-way: the hosts that got the minted key still work with the old key too, so remove the
-      // minted key now rather than leave an untracked live key behind. A re-run mints a fresh one.
-      try {
-        await deleteKey(mgmt as string, mintedHash, opts.fetchFn);
-        delete st.pending_issuer_ref;
-        issuerNotes.push(`deleted the minted key ${mintedHash} again because the rotation did not complete; re-run with --mint`);
-      } catch (e) {
-        issuerNotes.push(`could not delete the minted key ${mintedHash} (${(e as Error).message}); it is recorded as pending and will be removed by the next successful --mint, or delete it at https://openrouter.ai/settings/keys`);
-      }
+      // Pushes failed part-way. Sinks that were pushed hold ONLY the minted key (keymap never had the old value),
+      // so the minted key must stay live. It is recorded as pending and deleted by the next successful --mint,
+      // once every sink has been overwritten.
+      const pushed = outcomes.filter((o) => o.status === "pushed").map((o) => o.id);
+      issuerNotes.push(
+        pushed.length
+          ? `minted key ${mintedHash} stays live: ${pushed.join(", ")} already hold it. Re-run with --mint; the next successful rotation deletes it.`
+          : `minted key ${mintedHash} was pushed nowhere; it stays live and is deleted by the next successful --mint (or delete it at https://openrouter.ai/settings/keys).`
+      );
       await persist(state);
     }
   }

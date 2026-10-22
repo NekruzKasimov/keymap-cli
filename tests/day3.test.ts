@@ -141,9 +141,9 @@ describe("openrouter mint", () => {
     expect(r.ok).toBe(true);
     expect(await readFile(join(dir, ".env"), "utf8")).toBe("OPENROUTER_API_KEY=sk-or-v1-minted\n");
     expect(state.secrets.OPENROUTER_API_KEY).toMatchObject({ issuer_ref: "h-new", previous_issuer_ref: "h-old" });
-    expect(state.secrets.OPENROUTER_API_KEY.pending_issuer_ref).toBeUndefined();
+    expect(state.secrets.OPENROUTER_API_KEY.pending_issuer_refs).toEqual([]);
     expect(log.map((l) => l.method)).toEqual(["POST"]); // no DELETE: old key stays live until revoke
-    expect(persisted[0]).toContain('"pending_issuer_ref":"h-new"'); // recorded before any push
+    expect(persisted[0]).toContain('"pending_issuer_refs":["h-new"]'); // recorded before any push
     expect(r.issuerNotes.join(" ")).toMatch(/\$10 per day/);
     expect(r.issuerNotes.join(" ")).toMatch(/keymap revoke OPENROUTER_API_KEY/);
     expect(JSON.stringify(r)).not.toContain("sk-or-v1-minted");
@@ -168,24 +168,45 @@ describe("openrouter mint", () => {
     expect(r.issuerNotes.join(" ")).toMatch(/NO credit limit/);
   });
 
-  it("a push failure after mint deletes the minted key again and clears pending", async () => {
+  it("a push failure after mint keeps the minted key live and pending; the next success deletes it", async () => {
     const dir = await mkdtemp(join(tmpdir(), "keymap-"));
     await writeFile(join(dir, ".env"), "OPENROUTER_API_KEY=old\n");
-    const m2: Manifest = { ...manifest, secrets: { OPENROUTER_API_KEY: { issuer: "openrouter", sinks: [{ kind: "github", repo: "o/r" }, { kind: "local" }] } } };
+    const m2: Manifest = { ...manifest, secrets: { OPENROUTER_API_KEY: { issuer: "openrouter", sinks: [{ kind: "cloudflare", worker: "w" }, { kind: "github", repo: "o/r" }, { kind: "local" }] } } };
     const log: Array<{ url: string; method: string; body?: string }> = [];
-    const exec = fakeExec([{ cmd: "gh", result: { code: 1, stderr: "HTTP 403 sk-or-v1-minted leaked?" } }]);
+    let n = 0;
+    const fetchFn: FetchLike = async (url, init) => {
+      log.push({ url, method: init.method });
+      if (init.method === "POST") { n++; return { ok: true, status: 200, text: async () => JSON.stringify({ key: `sk-or-v1-m${n}`, data: { hash: `h-${n}`, name: "n" } }) }; }
+      if (init.method === "GET") return { ok: true, status: 200, text: async () => JSON.stringify({ data: [] }) };
+      return { ok: true, status: 200, text: async () => "{}" };
+    };
+    const exec = fakeExec([{ cmd: "wrangler", result: {} }, { cmd: "gh", result: { code: 1, stderr: "HTTP 403 with sk-or-v1-m1 inside" } }]);
     const state: State = { version: 1, secrets: {} };
-    const r = await runRotate(m2, state, { secret: "OPENROUTER_API_KEY", mint: true, fetchFn: fakeFetch(log), env: { KEYMAP_OPENROUTER_MGMT_KEY: "mgmt" } }, { exec, cwd: dir });
+    const env = { KEYMAP_OPENROUTER_MGMT_KEY: "mgmt" };
+    const r = await runRotate(m2, state, { secret: "OPENROUTER_API_KEY", mint: true, fetchFn, env }, { exec, cwd: dir });
     expect(r.ok).toBe(false);
-    expect(log.map((l) => l.method)).toEqual(["POST", "DELETE"]);
-    expect(log[1].url).toContain("h-new");
-    expect(state.secrets.OPENROUTER_API_KEY.pending_issuer_ref).toBeUndefined();
-    expect(state.secrets.OPENROUTER_API_KEY.issuer_ref).toBeUndefined();
+    expect(r.outcomes.map((o) => `${o.id}:${o.status}`)).toEqual(["cloudflare:w:pushed", "github:o/r:failed", "local:.env:skipped"]);
+    expect(log.map((l) => l.method)).toEqual(["POST"]); // no DELETE: cloudflare already serves h-1
+    expect(state.secrets.OPENROUTER_API_KEY.pending_issuer_refs).toEqual(["h-1"]);
     expect(await readFile(join(dir, ".env"), "utf8")).toBe("OPENROUTER_API_KEY=old\n");
     const text = formatRotate(r);
-    expect(text).toContain("[redacted]"); // value scrubbed from the gh error
-    expect(text).not.toContain("sk-or-v1-minted");
-    expect(text).toContain("re-run with --mint");
+    expect(text).toContain("[redacted]");
+    expect(text).not.toContain("sk-or-v1-m1");
+    expect(text).toMatch(/h-1 stays live: cloudflare:w already hold it/);
+
+    // second attempt succeeds everywhere: h-1 is now stale and gets deleted
+    const exec2 = fakeExec([{ cmd: "wrangler", result: {} }, { cmd: "gh", result: {} }]);
+    const r2 = await runRotate(m2, state, { secret: "OPENROUTER_API_KEY", mint: true, fetchFn, env }, { exec: exec2, cwd: dir });
+    expect(r2.ok).toBe(true);
+    expect(state.secrets.OPENROUTER_API_KEY).toMatchObject({ issuer_ref: "h-2", pending_issuer_refs: [] });
+    expect(log.filter((l) => l.method === "DELETE").map((l) => l.url)).toEqual(["https://openrouter.ai/api/v1/keys/h-1"]);
+    expect(r2.issuerNotes.join(" ")).toMatch(/deleted stale key h-1/);
+    expect(await readFile(join(dir, ".env"), "utf8")).toBe("OPENROUTER_API_KEY=sk-or-v1-m2\n");
+  });
+
+  it("refuses a second --mint while the previous key is unrevoked", async () => {
+    const state: State = { version: 1, secrets: { OPENROUTER_API_KEY: { issuer_ref: "h-2", previous_issuer_ref: "h-1", sinks: {} } } };
+    await expect(runRotate(manifest, state, { secret: "OPENROUTER_API_KEY", mint: true, env: { KEYMAP_OPENROUTER_MGMT_KEY: "m" } }, { exec: fakeExec([]), cwd: "/x" })).rejects.toThrow(/has not been revoked yet/);
   });
 
   it("revoke deletes the previous key only, never the current one", async () => {

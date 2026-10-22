@@ -24,8 +24,9 @@ async function ctxWithEnv(text = "OPENAI_API_KEY=old\n") {
 }
 
 describe("rotate", () => {
-  it("orders hosts, then CI, then local", () => {
+  it("orders staged hosts, then immediate hosts, then CI, then local", () => {
     expect(orderSinks(manifest.secrets.OPENAI_API_KEY.sinks).map((s) => s.kind)).toEqual(["railway", "github", "local"]);
+    expect(orderSinks([{ kind: "local" }, { kind: "cloudflare" }, { kind: "github" }, { kind: "supabase" }, { kind: "fly" }, { kind: "vercel" }]).map((s) => s.kind)).toEqual(["fly", "vercel", "cloudflare", "supabase", "github", "local"]);
   });
 
   it("dry run touches nothing", async () => {

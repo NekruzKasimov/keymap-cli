@@ -22,10 +22,27 @@ function isDir(p: string): boolean {
   }
 }
 
-/** Child environment: the user's env plus PATH fallbacks, minus keymap's own secrets (management key, webhook). */
-export function childEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+/** Every host credential variable keymap knows about. A child CLI sees only the ones its adapter asks for. */
+export const HOST_TOKEN_VARS = [
+  "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN",
+  "RAILWAY_TOKEN", "RAILWAY_API_TOKEN",
+  "VERCEL_TOKEN",
+  "FLY_API_TOKEN", "FLY_ACCESS_TOKEN",
+  "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_KEY", "CLOUDFLARE_EMAIL",
+  "SUPABASE_ACCESS_TOKEN",
+];
+
+/**
+ * Child environment: the user's env plus PATH fallbacks, minus keymap's own secrets (management key, webhook)
+ * and minus every host token except those in `tokens`.
+ */
+export function childEnv(env: NodeJS.ProcessEnv = process.env, tokens: string[] = []): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
-  for (const [k, v] of Object.entries(env)) if (!k.startsWith("KEYMAP_")) out[k] = v;
+  for (const [k, v] of Object.entries(env)) {
+    if (k.startsWith("KEYMAP_")) continue;
+    if (HOST_TOKEN_VARS.includes(k) && !tokens.includes(k)) continue;
+    out[k] = v;
+  }
   out.PATH = pathWithFallbacks(env);
   return out;
 }
@@ -42,7 +59,7 @@ export const realExec: Exec = (cmd, args, opts = {}) =>
     const child = execFile(
       cmd,
       args,
-      { cwd: opts.cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv(), timeout: EXEC_TIMEOUT_MS, killSignal: "SIGKILL" },
+      { cwd: opts.cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv(process.env, opts.tokens), timeout: EXEC_TIMEOUT_MS, killSignal: "SIGKILL" },
       (error, stdout, stderr) => {
         const err = error as (NodeJS.ErrnoException & { code?: number | string; killed?: boolean }) | null;
         let code = 0;

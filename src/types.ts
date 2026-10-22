@@ -55,8 +55,8 @@ export interface SecretState {
   issuer_ref?: string;
   /** Handle of the key this one replaced; still live until `keymap revoke`. */
   previous_issuer_ref?: string;
-  /** Handle of a key minted by a rotation that has not finished yet. */
-  pending_issuer_ref?: string;
+  /** Handles of keys minted by rotations that did not finish; deleted by the next successful --mint. */
+  pending_issuer_refs?: string[];
   last_rotated?: string;
   last_verified?: string;
   sinks: Record<string, SinkState>;
@@ -76,7 +76,7 @@ export interface ExecResult {
 export type Exec = (
   cmd: string,
   args: string[],
-  opts?: { stdin?: string; cwd?: string }
+  opts?: { stdin?: string; cwd?: string; /** Host token variables this call may see; every other known token is stripped. */ tokens?: string[] }
 ) => Promise<ExecResult>;
 
 export interface AdapterContext {
@@ -94,4 +94,6 @@ export interface SinkAdapter {
   set(ref: SinkRef, name: string, value: string, ctx: AdapterContext): Promise<SinkEntry>;
   /** Whether `list` returns a digest that can be compared across sinks. */
   verifiable: boolean;
+  /** Environment variables carrying this host's credentials; passed through only to this host's CLI. */
+  tokens: string[];
 }

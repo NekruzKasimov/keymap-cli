@@ -1,3 +1,4 @@
+import { adapterFor } from "../adapters/index.js";
 import type { AdapterContext, SinkKind } from "../types.js";
 
 /** One probe per host CLI: is it installed, and is it logged in? Read-only commands only. */
@@ -33,13 +34,14 @@ export async function runDoctor(ctx: AdapterContext, only?: SinkKind[]): Promise
   const rows: DoctorRow[] = [];
   for (const p of PROBES) {
     if (only && !only.includes(p.sink)) continue;
-    const v = await ctx.exec(p.cmd, p.versionArgs, { cwd: ctx.cwd });
+    const tokens = adapterFor(p.sink).tokens;
+    const v = await ctx.exec(p.cmd, p.versionArgs, { cwd: ctx.cwd, tokens });
     if (v.code === 127) {
       rows.push({ sink: p.sink, cmd: p.cmd, installed: false, loginHint: p.loginHint });
       continue;
     }
     const version = (v.stdout + v.stderr).match(/\d+\.\d+\.\d+/)?.[0];
-    const a = await ctx.exec(p.cmd, p.authArgs, { cwd: ctx.cwd });
+    const a = await ctx.exec(p.cmd, p.authArgs, { cwd: ctx.cwd, tokens });
     rows.push({ sink: p.sink, cmd: p.cmd, installed: true, version, loggedIn: p.loggedIn(a.stdout + a.stderr, a.code), loginHint: p.loginHint });
   }
   return rows;
