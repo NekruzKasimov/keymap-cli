@@ -1,0 +1,27 @@
+{
+  "name": "keymap-cli",
+  "version": "0.0.1",
+  "description": "Values-free map of every secret you run, where it lives, and one command to rotate it everywhere.",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "keymap": "./dist/cli.js" },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsup src/cli.ts --format esm --target node20 --clean",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "commander": "^13.1.0",
+    "yaml": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "tsup": "^8.4.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0"
+  }
+}
