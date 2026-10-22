@@ -3,6 +3,30 @@
   "version": "0.1.0",
   "description": "Values-free map of every secret you run, where it lives, and one command to rotate it everywhere.",
   "license": "MIT",
+  "author": "Nekruz Kasimov",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NekruzKasimov/keymap-cli.git"
+  },
+  "homepage": "https://github.com/NekruzKasimov/keymap-cli#readme",
+  "bugs": {
+    "url": "https://github.com/NekruzKasimov/keymap-cli/issues"
+  },
+  "keywords": [
+    "secrets",
+    "rotation",
+    "rotate",
+    "env",
+    "dotenv",
+    "railway",
+    "vercel",
+    "fly",
+    "cloudflare",
+    "supabase",
+    "github-actions",
+    "security",
+    "incident"
+  ],
   "type": "module",
   "bin": {
     "keymap": "./dist/cli.js"
