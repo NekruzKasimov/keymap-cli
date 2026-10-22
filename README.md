@@ -4,16 +4,14 @@ A values-free map of every secret you run, where it lives, and one command to ro
 
 **It is a map, not a vault.** keymap never stores a secret value. The manifest and its state hold names, locations, timestamps and short salted hashes. Values move only between your existing CLIs (`gh`, `railway`, …) and the host, over stdin or a mode-600 temp file, never through a shell string or on a command line.
 
-Built for solo and vibe-coded deployments after the OpenCode (Oct 16, 2026) and Railway (Oct 21, 2026) key thefts, when "rotate every variable" met "I don't remember where half of these are used".
+Built after the OpenCode (Oct 16, 2026) and Railway (Oct 21, 2026) key thefts, when "rotate every variable" met "I don't remember where half of these are used".
 
-## Status
-
-Day 4. All planned commands exist: `init`, `audit`, `mark`, `rotate`, `incident`, `remind`, `doctor`, for `local` (.env files), `github` (Actions secrets), `railway`, `vercel`, `fly`, `cloudflare` (Workers) and `supabase` (Edge Function secrets). OpenRouter keys can be minted by API. Not yet published to npm.
+Commands: `init`, `audit`, `mark`, `rotate`, `incident`, `remind`, `doctor`. Hosts: `local` (.env files), `github` (Actions secrets), `railway`, `vercel`, `fly`, `cloudflare` (Workers), `supabase` (Edge Function secrets). OpenRouter keys can be minted by API.
 
 ## Quick start
 
 ```sh
-npm i -g keymap-cli            # or: npx keymap-cli   (not published yet; see Status)
+npm i -g keymap-cli            # or: npx keymap-cli
 cd your-project
 keymap init -s local:.env github:owner/repo railway:api/production
 # edit keymap.yaml: issuers, rotate_every, ignore list
