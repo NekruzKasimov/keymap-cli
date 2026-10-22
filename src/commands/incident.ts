@@ -3,7 +3,7 @@ import type { AdapterContext, Issuer, Manifest, SinkKind, State } from "../types
 import { formatRotate, runRotate, type RotateResult } from "./rotate.js";
 
 /**
- * Blast-radius tiers, in the order Railway's own disclosure told customers to work:
+ * Blast-radius tiers, most dangerous first (AI inference keys were the attackers' target in the Oct 2026 Railway incident):
  * AI provider keys, cloud access, database, source control, package registries, then everything else.
  */
 export type Tier = 0 | 1 | 2 | 3 | 4 | 5;
