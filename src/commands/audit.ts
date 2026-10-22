@@ -65,7 +65,7 @@ export async function runAudit(manifest: Manifest, state: State, ctx: AdapterCon
       const entry = listing.get(name);
       row.sinks.push({ id, present: !!entry, digest: entry?.digest, verifiable: adapter.verifiable });
       if (!entry) findings.push({ kind: "missing", secret: name, sink: id });
-      else if (entry.digest) digests.set(id, entry.digest);
+      else if (entry.digest && /^[0-9a-f]{8}$/.test(entry.digest)) digests.set(id, entry.digest); // provider-native digests (fly:…) are not comparable
     }
     const distinct = new Set(digests.values());
     if (distinct.size > 1) findings.push({ kind: "drift", secret: name, sinks: [...digests.keys()] });

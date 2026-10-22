@@ -8,7 +8,7 @@ Built for solo and vibe-coded deployments after the OpenCode (Oct 16, 2026) and 
 
 ## Status
 
-Day 1. `init`, `audit`, `mark` work for `local` (.env files), `github` (Actions secrets) and `railway`. `rotate`, `incident`, `remind` and the Vercel / Fly / Cloudflare / Supabase adapters are next.
+Day 2. `init`, `audit`, `mark` and `rotate` work for `local` (.env files), `github` (Actions secrets), `railway`, `vercel` and `fly`. `incident`, `remind` and the Cloudflare / Supabase adapters are next.
 
 ## Quick start
 
@@ -19,7 +19,11 @@ keymap init -s local:.env github:owner/repo railway:api/production
 # edit keymap.yaml: issuers, rotate_every, ignore list
 keymap audit                   # exit 1 on missing / drift / overdue / unmapped
 keymap mark OPENAI_API_KEY     # you rotated it by hand today
+pbpaste | keymap rotate OPENAI_API_KEY   # push a new key everywhere, hosts first, laptop last
+keymap rotate SESSION_SECRET --generate  # mint a random value for a secret you own
 ```
+
+`rotate` stops at the first failing sink, tells you which sinks still hold the old value, and never records a rotation it did not finish. The value is read from stdin so it stays out of shell history.
 
 ## keymap.yaml
 
