@@ -48,7 +48,7 @@ INCIDENT railway: 4 secrets to rotate, most dangerous first
 [2] Database and storage credentials
     DATABASE_URL        custom   exposed at railway:api; also lives at local:.env
 [4] Package registry credentials
-    NPM_TOKEN           custom   exposed at railway:worker; also lives at nowhere else
+    NPM_TOKEN           custom   exposed at railway:worker; lives nowhere else
 ```
 
 The order follows Railway's own disclosure guidance: AI keys, cloud and payments, databases, source control, package registries. `--walk` asks for each new value, pushes it everywhere, and ends with the list of anything still exposed.

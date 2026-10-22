@@ -4,7 +4,7 @@ import type { Manifest, SecretSpec, SinkRef } from "./types.js";
 
 export const MANIFEST_FILE = "keymap.yaml";
 
-const ISSUERS = new Set(["openai", "anthropic", "openrouter", "google", "stripe", "supabase", "cloudflare", "custom"]);
+const ISSUERS = new Set(["openai", "anthropic", "openrouter", "google", "stripe", "supabase", "cloudflare", "resend", "telegram", "github", "custom"]);
 const SINKS = new Set(["local", "github", "railway", "vercel", "fly", "cloudflare", "supabase"]);
 
 export class ManifestError extends Error {}

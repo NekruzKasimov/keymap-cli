@@ -27,6 +27,11 @@ export function tierOf(name: string, issuer: Issuer): Tier {
   return 5;
 }
 
+function elsewhere(it: IncidentItem): string {
+  const rest = it.allSinks.filter((s) => !it.exposedAt.includes(s));
+  return rest.length ? `also lives at ${rest.join(", ")}` : "lives nowhere else";
+}
+
 export interface IncidentItem {
   secret: string;
   issuer: Issuer;
@@ -62,7 +67,7 @@ export function formatPlan(host: SinkKind, items: IncidentItem[]): string {
       lines.push(`[${it.tier}] ${TIER_LABEL[it.tier]}`);
       last = it.tier;
     }
-    lines.push(`    ${it.secret.padEnd(28)} ${it.issuer.padEnd(10)} exposed at ${it.exposedAt.join(", ")}; also lives at ${it.allSinks.filter((s) => !it.exposedAt.includes(s)).join(", ") || "nowhere else"}`);
+    lines.push(`    ${it.secret.padEnd(28)} ${it.issuer.padEnd(10)} exposed at ${it.exposedAt.join(", ")}; ${elsewhere(it)}`);
   }
   lines.push("", "Run `keymap incident <host> --walk` to rotate each one in turn, or `keymap rotate <SECRET>` individually.");
   return lines.join("\n");

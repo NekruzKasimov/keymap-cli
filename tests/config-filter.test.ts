@@ -28,3 +28,14 @@ describe("guessIssuer additions", () => {
     expect(guessIssuer("ESKIZ_PASSWORD")).toBe("custom");
   });
 });
+
+import { validateManifest } from "../src/manifest.js";
+import { parse as parseYaml } from "yaml";
+describe("manifest accepts every issuer init can guess", () => {
+  it("loads github, resend and telegram issuers", () => {
+    for (const issuer of ["github", "resend", "telegram"]) {
+      const m = validateManifest(parseYaml(`version: 1\nproject: p\nsecrets:\n  X_TOKEN:\n    issuer: ${issuer}\n    rotate_every: 30d\n    sinks:\n      - local: {file: .env}\n`));
+      expect(m.secrets.X_TOKEN.issuer).toBe(issuer);
+    }
+  });
+});
